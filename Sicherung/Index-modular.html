@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ImmoAdmin - Hausverwaltung</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/dexie@latest/dist/dexie.js"></script>
+    <style>
+        .view-section { display: none; }
+        .view-section.active { display: block; }
+        .tab-active { border-bottom: 2px solid #3b82f6; color: #3b82f6; font-weight: bold; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans min-h-screen flex flex-col">
+
+    <header class="bg-white shadow-sm sticky top-0 z-10">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center h-16">
+            <div class="flex items-center gap-4">
+                <h1 class="text-xl font-bold text-blue-600">ImmoAdmin</h1>
+				<input type="text" id="global-search" placeholder="Suche (Enter drücken)..." class="bg-gray-100 border-none rounded text-sm p-2 w-48 md:w-64 focus:ring-2 focus:ring-blue-500" onkeyup="ImmoApp.search.handleInput(event)">
+                <select id="global-year-select" class="bg-gray-100 border-none rounded text-sm font-medium p-2 cursor-pointer">
+                    <option value="2023">Jahr 2023</option>
+                    <option value="2024" selected>Jahr 2024</option>
+                    <option value="2025">Jahr 2025</option>
+                    <option value="2026">Jahr 2026</option>
+                </select>
+            </div>
+<nav class="flex space-x-4 overflow-x-auto border-b">
+    <button onclick="ImmoApp.ui.switchTab('dashboard')" id="nav-dashboard" class="nav-btn tab-active pb-1 px-2 text-sm">Dashboard</button>
+    <button onclick="ImmoApp.ui.switchTab('tenants')" id="nav-tenants" class="nav-btn pb-1 px-2 text-sm">Mieter & Objekte</button>
+    <button onclick="ImmoApp.ui.switchTab('banking')" id="nav-banking" class="nav-btn pb-1 px-2 text-sm">Kontoauszug</button>
+    <button onclick="ImmoApp.ui.switchTab('utilities')" id="nav-utilities" class="nav-btn pb-1 px-2 text-sm text-gray-600">📊 Nebenkosten</button>
+    <button onclick="ImmoApp.ui.switchTab('maintenance')" id="nav-maintenance" class="nav-btn pb-1 px-2 text-sm">Wartung</button>
+    <button onclick="ImmoApp.ui.switchTab('settings')" id="nav-settings" class="nav-btn pb-1 px-2 text-sm text-gray-500">⚙️ Backup</button>
+</nav>
+        </div>
+    </header>
+
+    <main class="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+        
+        <div id="view-dashboard" class="view-section active">
+            <h2 class="text-2xl font-bold mb-6">Dashboard <span class="year-label text-blue-600"></span></h2>
+            <div id="dashboard-content">
+                <p class="text-gray-500">Lade Module...</p>
+            </div>
+        </div>
+<div id="view-search" class="view-section">
+            <h2 class="text-2xl font-bold mb-6">Suchergebnisse für "<span id="search-query-display" class="text-blue-600"></span>"</h2>
+            <div id="search-content">
+                <p class="text-gray-500">Lade Module...</p>
+            </div>
+        </div>
+        <div id="view-tenants" class="view-section">
+            <h2 class="text-2xl font-bold mb-6">Mieter & Objekte <span class="year-label"></span></h2>
+            <div id="tenants-content">
+                <p class="text-gray-500">Lade Module...</p>
+            </div>
+        </div>
+
+<div id="view-banking" class="view-section">
+            <h2 class="text-2xl font-bold mb-6">Kontoauszug & Zuordnung <span class="year-label"></span></h2>
+            <div id="banking-content">
+                <p class="text-gray-500">Lade Module...</p>
+            </div>
+        </div> <div id="view-utilities" class="view-section">
+            <div id="utilities-content">
+                <p class="text-gray-500">Lade Module...</p>
+            </div>
+        </div>
+       
+		<div id="view-maintenance" class="view-section">
+            <h2 class="text-2xl font-bold mb-6">Wartung & Notizen</h2>
+            <div id="maintenance-content">
+                <p class="text-gray-500">Lade Module...</p>
+            </div>
+        </div>
+
+        <div id="view-settings" class="view-section">
+            <h2 class="text-2xl font-bold mb-6">Daten-Backup & Einstellungen</h2>
+            <div id="settings-content">
+                <p class="text-gray-500">Lade Module...</p>
+            </div>
+        </div>
+    </main>
+	<div id="modal-property" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+        <div class="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
+            <h3 class="text-xl font-bold mb-4">Objekt bearbeiten</h3>
+            <input type="hidden" id="modal-prop-id">
+            <div class="space-y-3">
+                <label class="block text-sm font-medium">Name / Adresse (z.B. Forststraße 18)</label>
+                <input type="text" id="modal-prop-name" class="w-full border p-2 rounded">
+            </div>
+            <div class="mt-6 flex justify-end gap-2">
+                <button onclick="document.getElementById('modal-property').classList.add('hidden')" class="px-4 py-2 bg-gray-200 rounded">Abbrechen</button>
+                <button onclick="ImmoApp.tenants.saveProperty()" class="px-4 py-2 bg-blue-600 text-white rounded">Speichern</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-tenant" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50 overflow-y-auto">
+        <div class="bg-white p-6 rounded-lg shadow-lg w-full max-w-lg my-8">
+            <h3 class="text-xl font-bold mb-4">Mieter bearbeiten</h3>
+            <input type="hidden" id="modal-tenant-id">
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium">Zugeordnetes Objekt <span class="text-red-500">*</span></label>
+                    <select id="modal-tenant-property" class="w-full border p-2 rounded bg-white"></select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium">Name des Mieters <span class="text-red-500">*</span></label>
+                    <input type="text" id="modal-tenant-name" class="w-full border p-2 rounded">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium">Soll-Miete (€)</label>
+                        <input type="number" id="modal-tenant-rent" class="w-full border p-2 rounded" step="0.01">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium">IBAN</label>
+                        <input type="text" id="modal-tenant-iban" class="w-full border p-2 rounded text-sm uppercase">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4 border-t pt-4">
+                    <div>
+                        <label class="block text-sm font-medium">Einzugsdatum</label>
+                        <input type="date" id="modal-tenant-movein" class="w-full border p-2 rounded">
+                        <p class="text-xs text-gray-500 mt-1">Pflicht für korrekte Berechnung</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium">Auszugsdatum</label>
+                        <input type="date" id="modal-tenant-moveout" class="w-full border p-2 rounded">
+                        <p class="text-xs text-gray-500 mt-1">Leer lassen, wenn aktiv</p>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-6 flex justify-end gap-2">
+                <button onclick="document.getElementById('modal-tenant').classList.add('hidden')" class="px-4 py-2 bg-gray-200 rounded text-gray-800">Abbrechen</button>
+                <button onclick="ImmoApp.tenants.saveTenant()" class="px-4 py-2 bg-blue-600 rounded text-white">Speichern</button>
+            </div>
+        </div>
+    </div>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="js/db.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/dashboard.js"></script>
+    <script src="js/tenants.js"></script>
+    <script src="js/banking.js"></script>
+	<script src="js/utilities.js"></script>
+    <script src="js/maintenance.js"></script>
+    <script src="js/settings.js"></script>
+<script src="js/search.js"></script>
+ <script>
+        window.onload = async () => {
+            const db = new Dexie("ImmoAdminDB");
+            
+            // WICHTIG: Version auf 10 erhöht, um das Anlegen der Tabelle zu erzwingen!
+            db.version(10).stores({
+                properties: '++id, name',
+                tenants: '++id, propertyId, name, rent, iban, moveIn, moveOut',
+                transactions: '++id, date, amount, purpose, iban, name, matchedTenantId, category, year, importBatchId',
+                utilities: '++id, name, amount, year, importBatchId, propertyId',
+                maintenance: '++id, task, status, date, recordType' 
+            });
+            window.ImmoApp.db.instance = db;
+            await window.ImmoApp.db.init(); 
+
+            ImmoApp.ui.init();
+            
+            // Lade die Inhalte der Module
+            if(window.ImmoApp.dashboard) ImmoApp.dashboard.render();
+            if(window.ImmoApp.tenants) ImmoApp.tenants.render();
+            if(window.ImmoApp.banking) ImmoApp.banking.render();
+            if(window.ImmoApp.maintenance) ImmoApp.maintenance.render();
+            if(window.ImmoApp.settings) ImmoApp.settings.render();
+            if(window.ImmoApp.search) ImmoApp.search.render();
+            if(window.ImmoApp.utilities) ImmoApp.utilities.render();
+            console.log("ImmoAdmin: Alle Module geladen. System bereit!");
+        };
+    </script>
+</body>
+</html>

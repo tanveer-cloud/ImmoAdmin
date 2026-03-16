@@ -1,0 +1,375 @@
+window.ImmoApp = window.ImmoApp || {};
+
+window.ImmoApp.utils = {
+    getActiveMonthsInYear: function(moveInStr, moveOutStr, targetYear) {
+        const year = parseInt(targetYear);
+        const yearStart = new Date(year, 0, 1);
+        const yearEnd = new Date(year, 11, 31);
+        
+        const moveIn = moveInStr ? new Date(moveInStr) : new Date(2000, 0, 1);
+        const moveOut = moveOutStr ? new Date(moveOutStr) : new Date(2099, 11, 31);
+
+        if (moveIn > yearEnd || moveOut < yearStart) return 0;
+
+        const effectiveStart = moveIn > yearStart ? moveIn : yearStart;
+        const effectiveEnd = moveOut < yearEnd ? moveOut : yearEnd;
+
+        let months = (effectiveEnd.getFullYear() - effectiveStart.getFullYear()) * 12;
+        months -= effectiveStart.getMonth();
+        months += effectiveEnd.getMonth() + 1;
+        return months <= 0 ? 0 : months;
+    }
+};
+
+window.ImmoApp.dashboard = {
+    setupHTML: function() {
+        const container = document.getElementById("dashboard-content");
+        if (container.innerHTML.includes("Lade Module...")) {
+            container.innerHTML = `
+                <div id="dash-alerts-container" class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 hidden">
+                    <div class="bg-orange-50 p-6 rounded-lg shadow-sm border border-orange-200">
+                        <h3 class="text-orange-800 text-sm font-bold mb-2 uppercase flex items-center gap-2"><span>💰</span> Ausstehende Kautionen</h3>
+                        <ul id="dash-deposit-alerts" class="space-y-2 text-sm"></ul>
+                    </div>
+                    <div class="bg-red-50 p-6 rounded-lg shadow-sm border border-red-200">
+                        <h3 class="text-red-800 text-sm font-bold mb-2 uppercase flex items-center gap-2"><span>🛏️</span> WG-Leerstands-Radar</h3>
+                        <ul id="dash-vacancy-alerts" class="space-y-2 text-sm"></ul>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+                        <h3 class="text-gray-500 text-sm font-semibold mb-1">Gesamt-Mieteinnahmen (Soll)</h3>
+                        <p class="text-3xl font-bold text-green-600" id="dash-expected-rent">0,00 €</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+                        <h3 class="text-gray-500 text-sm font-semibold mb-1">Ist-Einnahmen (Jahr)</h3>
+                        <p class="text-3xl font-bold text-blue-600" id="dash-actual-rent">0,00 €</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+                        <h3 class="text-gray-500 text-sm font-semibold mb-1">Ausstehend</h3>
+                        <p class="text-3xl font-bold text-red-500" id="dash-missing-rent">0,00 €</p>
+                    </div>
+                </div>
+                
+                <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+                    <h3 class="text-lg font-bold mb-4 text-gray-800">📊 Mietstatus im gewählten Jahr</h3>
+                    <ul id="dash-status-list" class="space-y-2 text-sm"></ul>
+                </div>
+                
+                <div id="modal-monthly-details" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50 overflow-y-auto">
+                    <div class="bg-white p-6 rounded-lg shadow-lg w-full max-w-4xl my-8">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-xl font-bold">Zahlungen: <span id="monthly-tenant-name" class="text-blue-600"></span></h3>
+                            <span id="monthly-year-label" class="font-bold bg-gray-200 px-2 py-1 rounded"></span>
+                        </div>
+                        <div class="border rounded-lg overflow-hidden">
+                            <table class="min-w-full divide-y divide-gray-200 text-sm">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-4 py-2 text-left w-16">Monat</th>
+                                        <th class="px-4 py-2 text-right">Soll</th>
+                                        <th class="px-4 py-2 text-right">Ist (Klicken für Details)</th>
+                                        <th class="px-4 py-2 text-right">Diff.</th>
+                                        <th class="px-4 py-2 text-right w-64">Status & Aktion</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="monthly-table-body" class="bg-white divide-y divide-gray-200"></tbody>
+                            </table>
+                        </div>
+                        <div class="mt-6 flex justify-between items-center">
+                            <div class="flex gap-2">
+                                <button id="btn-jump-banking" class="text-sm bg-blue-50 text-blue-600 font-bold px-4 py-2 rounded hover:bg-blue-100 border border-blue-200">🔍 Kontoauszug</button>
+                                <button id="btn-jump-history" class="text-sm bg-purple-50 text-purple-600 font-bold px-4 py-2 rounded hover:bg-purple-100 border border-purple-200">📊 Historie (Alle Jahre)</button>
+                            </div>
+                            <button onclick="document.getElementById('modal-monthly-details').classList.add('hidden')" class="px-6 py-2 bg-gray-800 text-white rounded hover:bg-gray-900 font-bold">Schließen</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    },
+
+    jumpToBanking: function(tenantName) {
+        document.getElementById('modal-monthly-details').classList.add('hidden');
+        ImmoApp.ui.switchTab('banking');
+        setTimeout(() => {
+            if(ImmoApp.banking) {
+                const filterInput = document.getElementById('banking-text-filter');
+                const statusFilter = document.getElementById('banking-status-filter');
+                if(filterInput && statusFilter) {
+                    filterInput.value = tenantName;
+                    statusFilter.value = "ALL";
+                    ImmoApp.banking.render();
+                }
+            }
+        }, 50);
+    },
+
+    editTenantDirectly: function(tenantId) {
+        ImmoApp.ui.switchTab('tenants');
+        setTimeout(() => {
+            if(ImmoApp.tenants) ImmoApp.tenants.showTenantModal(tenantId);
+        }, 50);
+    },
+
+    addManualPayment: async function(tenantId, month, amount) {
+        const db = ImmoApp.db.instance;
+        const tenant = await db.tenants.get(tenantId);
+        const currentYear = ImmoApp.ui.currentYear;
+        const monthStr = month.toString().padStart(2, '0');
+
+        if(confirm(`Möchtest du eine manuelle Korrektur über ${ImmoApp.ui.formatCurrency(amount)} eintragen?`)) {
+            await db.transactions.add({
+                date: `15.${monthStr}.${currentYear.substring(2)}`,
+                amount: amount, 
+                name: tenant.name, 
+                purpose: `Manuell ausgeglichen für ${monthStr}/${currentYear}`, // NEU: Klare Formulierung
+                iban: 'MANUELL', 
+                matchedTenantId: tenantId, 
+                category: 'RENT', 
+                year: currentYear, 
+                importBatchId: 'manual'
+            });
+            this.showMonthlyDetails(tenantId);
+            this.render();
+            if(window.ImmoApp.banking) ImmoApp.banking.render();
+        }
+    },
+
+    deleteManualPayment: async function(txId, tenantId) {
+        if(confirm("Möchtest du diesen manuellen Eintrag wirklich wieder löschen?")) {
+            await ImmoApp.db.instance.transactions.delete(txId);
+            this.showMonthlyDetails(tenantId);
+            this.render();
+            if(window.ImmoApp.banking) ImmoApp.banking.render();
+        }
+    },
+
+    markDepositPaid: async function(tenantId) {
+        if(confirm("Wurde die Kaution an den Mieter zurücküberwiesen und soll sie aus dieser Warnliste verschwinden?")) {
+            const db = ImmoApp.db.instance;
+            await db.tenants.update(tenantId, { depositReturned: true });
+            this.render();
+            if(window.ImmoApp.tenants) ImmoApp.tenants.render();
+        }
+    },
+
+    render: async function() {
+        this.setupHTML();
+        const db = ImmoApp.db.instance;
+        const currentYear = ImmoApp.ui.currentYear;
+        const today = new Date();
+        
+        const allTenants = await db.tenants.toArray();
+        const allTrans = await db.transactions.where('year').equals(currentYear).toArray();
+        const allProps = await db.properties.toArray();
+
+        const depositList = document.getElementById("dash-deposit-alerts");
+        const vacancyList = document.getElementById("dash-vacancy-alerts");
+        depositList.innerHTML = "";
+        vacancyList.innerHTML = "";
+        let alertsFound = false;
+
+        allTenants.forEach(t => {
+            if(t.deposit > 0 && !t.depositReturned && t.moveOut) {
+                const outDate = new Date(t.moveOut);
+                if(outDate < today) {
+                    alertsFound = true;
+                    const depositLink = `<button onclick="ImmoApp.dashboard.jumpToBanking('${t.name}')" class="text-blue-600 hover:underline font-bold" title="Klicken, um im Kontoauszug nach der Rückzahlung zu suchen">${ImmoApp.ui.formatCurrency(t.deposit)} 🔍</button>`;
+                    
+                    depositList.innerHTML += `
+                        <li class="flex justify-between items-center bg-white p-2 rounded shadow-sm border border-orange-100">
+                            <div>
+                                <strong class="text-orange-900 block cursor-pointer hover:underline" onclick="ImmoApp.dashboard.editTenantDirectly(${t.id})">${t.name}</strong>
+                                <span class="text-xs text-orange-700">Auszug: ${outDate.toLocaleDateString('de-DE')} | Kaution: ${depositLink}</span>
+                            </div>
+                            <button onclick="ImmoApp.dashboard.markDepositPaid(${t.id})" class="text-xs bg-orange-100 hover:bg-orange-200 text-orange-800 px-2 py-1 rounded font-bold">Als Erledigt markieren</button>
+                        </li>
+                    `;
+                }
+            }
+        });
+
+        allProps.forEach(p => {
+            if(p.totalRooms && p.totalRooms > 0) {
+                const currentlyActive = allTenants.filter(t => {
+                    if(t.propertyId !== p.id) return false;
+                    const inDate = t.moveIn ? new Date(t.moveIn) : new Date('2000-01-01');
+                    const outDate = t.moveOut ? new Date(t.moveOut) : new Date('2099-12-31');
+                    return (today >= inDate && today <= outDate);
+                });
+                
+                const emptyRooms = p.totalRooms - currentlyActive.length;
+                if(emptyRooms > 0) {
+                    alertsFound = true;
+                    vacancyList.innerHTML += `
+                        <li class="bg-white p-2 rounded shadow-sm border border-red-100 flex justify-between items-center">
+                            <div>
+                                <strong class="text-red-900 block">${p.name}</strong>
+                                <span class="text-xs text-red-700">Aktuell sind ${emptyRooms} von ${p.totalRooms} Zimmern nicht besetzt!</span>
+                            </div>
+                            <button onclick="ImmoApp.ui.switchTab('tenants')" class="text-xs bg-red-100 text-red-800 px-2 py-1 rounded hover:bg-red-200">Zur Verwaltung</button>
+                        </li>
+                    `;
+                }
+            }
+        });
+
+        if(!alertsFound) {
+            document.getElementById("dash-alerts-container").classList.add("hidden");
+        } else {
+            document.getElementById("dash-alerts-container").classList.remove("hidden");
+            if(depositList.innerHTML === "") depositList.innerHTML = `<li class="text-gray-500 italic text-xs">Alles erledigt.</li>`;
+            if(vacancyList.innerHTML === "") vacancyList.innerHTML = `<li class="text-gray-500 italic text-xs">WGs sind voll besetzt!</li>`;
+        }
+
+        let expectedYearly = 0;
+        const activeTenants = [];
+        
+        allTenants.forEach(t => {
+            const activeMonths = ImmoApp.utils.getActiveMonthsInYear(t.moveIn, t.moveOut, currentYear);
+            if (activeMonths > 0) {
+                expectedYearly += (t.rent * activeMonths);
+                activeTenants.push({ ...t, activeMonths });
+            }
+        });
+
+        const actualRent = allTrans
+            .filter(tx => tx.category === 'RENT')
+            .reduce((sum, tx) => sum + tx.amount, 0);
+
+        document.getElementById("dash-expected-rent").innerText = ImmoApp.ui.formatCurrency(expectedYearly);
+        document.getElementById("dash-actual-rent").innerText = ImmoApp.ui.formatCurrency(actualRent);
+        document.getElementById("dash-missing-rent").innerText = ImmoApp.ui.formatCurrency(expectedYearly - actualRent);
+
+        const statusList = document.getElementById("dash-status-list");
+        statusList.innerHTML = "";
+        
+        if(activeTenants.length === 0) {
+            statusList.innerHTML = `<li class="text-gray-500 italic">Keine aktiven Mieter für dieses Jahr gefunden.</li>`;
+        }
+
+        for (let tenant of activeTenants) {
+            const expectedForTenant = tenant.rent * tenant.activeMonths;
+            const paid = allTrans
+                .filter(tx => tx.matchedTenantId === tenant.id && tx.category === 'RENT')
+                .reduce((sum, tx) => sum + tx.amount, 0);
+            
+            const pInfo = tenant.isFlatRate ? '<span class="text-[10px] bg-purple-100 text-purple-800 px-1 rounded ml-2 relative -top-0.5">Pauschalmieter</span>' : '';
+
+            if (expectedForTenant > 0 && paid < (expectedForTenant - (tenant.rent * 0.5))) {
+                statusList.innerHTML += `
+                    <li class="p-3 bg-red-50 border border-red-200 rounded cursor-pointer hover:bg-red-100 transition shadow-sm" onclick="ImmoApp.dashboard.showMonthlyDetails(${tenant.id})">
+                        <div class="flex justify-between items-center">
+                            <strong class="text-red-700 hover:underline hover:text-blue-800" onclick="event.stopPropagation(); ImmoApp.dashboard.editTenantDirectly(${tenant.id});" title="Mieter direkt bearbeiten">${tenant.name} ${pInfo}</strong>
+                            <span class="text-xs bg-red-600 text-white px-2 py-1 rounded-full">Prüfen ➔</span>
+                        </div>
+                        <div class="mt-1 text-gray-700">
+                            Soll: ${ImmoApp.ui.formatCurrency(expectedForTenant)} | Ist: <span class="font-bold text-red-600">${ImmoApp.ui.formatCurrency(paid)}</span>
+                            <span class="text-xs text-red-600 block mt-1">Es fehlen ${ImmoApp.ui.formatCurrency(expectedForTenant - paid)}. Klicke für Details.</span>
+                        </div>
+                    </li>`;
+            } else {
+                statusList.innerHTML += `
+                    <li class="p-3 bg-green-50 border border-green-200 rounded cursor-pointer hover:bg-green-100 transition shadow-sm" onclick="ImmoApp.dashboard.showMonthlyDetails(${tenant.id})">
+                        <div class="flex justify-between items-center">
+                            <strong class="text-green-800 hover:underline hover:text-blue-800" onclick="event.stopPropagation(); ImmoApp.dashboard.editTenantDirectly(${tenant.id});" title="Mieter direkt bearbeiten">${tenant.name} ${pInfo}</strong>
+                            <span class="text-xs bg-green-600 text-white px-2 py-1 rounded-full">Details ➔</span>
+                        </div>
+                        <div class="mt-1 text-gray-700">
+                            Soll: ${ImmoApp.ui.formatCurrency(expectedForTenant)} | Ist: <span class="font-bold text-green-600">${ImmoApp.ui.formatCurrency(paid)}</span>
+                            <span class="text-xs text-green-600 font-bold block mt-1">✅ Ausgeglichen.</span>
+                        </div>
+                    </li>`;
+            }
+        }
+    },
+
+    showMonthlyDetails: async function(tenantId) {
+        const db = ImmoApp.db.instance;
+        const currentYear = ImmoApp.ui.currentYear;
+        const tenant = await db.tenants.get(tenantId);
+        const allTrans = await db.transactions.where('year').equals(currentYear)
+                            .filter(tx => tx.matchedTenantId === tenantId && tx.category === 'RENT').toArray();
+        
+        document.getElementById('monthly-tenant-name').innerText = tenant.name;
+        document.getElementById('monthly-year-label').innerText = currentYear;
+        
+        document.getElementById('btn-jump-banking').onclick = () => ImmoApp.dashboard.jumpToBanking(tenant.name);
+        document.getElementById('btn-jump-history').onclick = () => {
+            document.getElementById('modal-monthly-details').classList.add('hidden');
+            ImmoApp.ui.switchTab('tenants');
+            setTimeout(() => {
+                if(ImmoApp.tenants) ImmoApp.tenants.showHistoryModal(tenantId);
+            }, 50);
+        };
+        
+        const tbody = document.getElementById('monthly-table-body');
+        tbody.innerHTML = "";
+        const monthNames = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+        
+        for(let month = 1; month <= 12; month++) {
+            const checkDate = new Date(currentYear, month - 1, 15);
+            const moveIn = tenant.moveIn ? new Date(tenant.moveIn) : new Date(2000, 0, 1);
+            const moveOut = tenant.moveOut ? new Date(tenant.moveOut) : new Date(2099, 11, 31);
+            
+            let expected = (checkDate >= moveIn && checkDate <= moveOut) ? tenant.rent : 0;
+            const monthStr = month.toString().padStart(2, '0');
+            
+            const monthTxs = allTrans.filter(tx => tx.date.split('.')[1] === monthStr);
+            const manualTxs = monthTxs.filter(tx => tx.importBatchId === 'manual');
+            
+            const paidThisMonth = monthTxs.reduce((sum, tx) => sum + tx.amount, 0);
+            const diff = paidThisMonth - expected;
+            
+            let statusText = "<span class='text-gray-400'>-</span>";
+            let rowClass = "hover:bg-gray-50";
+            
+            let deleteManualBtn = '';
+            let manualAmountSum = 0;
+            
+            // NEU: Wenn es eine manuelle Buchung gibt, erfassen wir die Summe und blenden den Mülleimer ein
+            if (manualTxs.length > 0) {
+                manualAmountSum = manualTxs.reduce((sum, tx) => sum + tx.amount, 0);
+                deleteManualBtn = `<button onclick="ImmoApp.dashboard.deleteManualPayment(${manualTxs[0].id}, ${tenant.id})" class="ml-2 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-xs px-2 py-1 rounded shadow-sm" title="Manuelle Korrektur rückgängig machen">🗑️</button>`;
+            }
+            
+            if(expected > 0 || paidThisMonth !== 0) {
+                if(diff === 0 && expected > 0) {
+                    // NEU: Unterscheidung zwischen echter Zahlung und manuellem Ausgleich
+                    if(manualTxs.length > 0) {
+                        statusText = "✅ <span class='text-blue-600 text-xs font-bold'>Manuell ausgeglichen</span>" + deleteManualBtn;
+                    } else {
+                        statusText = "✅ <span class='text-green-600 text-xs font-bold'>Bezahlt</span>";
+                    }
+                } else if (diff < 0) {
+                    statusText = `❌ <span class='text-red-600 text-xs font-bold'>Rückstand</span> <button onclick="ImmoApp.dashboard.addManualPayment(${tenant.id}, ${month}, ${Math.abs(diff)})" class="ml-2 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs px-2 py-1 rounded border shadow-sm" title="Mit manueller Zahlung ausgleichen">Ausgleichen</button>` + deleteManualBtn;
+                    rowClass = "bg-red-50";
+                } else if (diff > 0) {
+                    statusText = `⚠️ <span class='text-blue-600 text-xs font-bold'>Guthaben</span> <button onclick="ImmoApp.dashboard.addManualPayment(${tenant.id}, ${month}, -${diff})" class="ml-2 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs px-2 py-1 rounded border shadow-sm" title="Guthaben manuell abziehen">Korrigieren</button>` + deleteManualBtn;
+                }
+            }
+
+            // NEU: Den manuellen Anteil transparent in der "Ist"-Spalte anzeigen
+            let paidColumnHtml = ImmoApp.ui.formatCurrency(paidThisMonth);
+            if (paidThisMonth !== 0) {
+                paidColumnHtml = `<button onclick="ImmoApp.dashboard.jumpToBanking('${tenant.name}')" class="text-blue-600 hover:underline font-bold block w-full text-right" title="Klicken, um die verbuchten Zahlungen im Kontoauszug zu sehen">${paidColumnHtml}</button>`;
+            }
+            if (manualTxs.length > 0) {
+                paidColumnHtml += `<span class="block text-[10px] text-gray-500 font-normal mt-0.5">(davon ${ImmoApp.ui.formatCurrency(manualAmountSum)} manuell)</span>`;
+            }
+
+            tbody.innerHTML += `
+                <tr class="${rowClass} border-b">
+                    <td class="px-4 py-2 font-bold">${monthNames[month-1]}</td>
+                    <td class="px-4 py-2 text-right">${ImmoApp.ui.formatCurrency(expected)}</td>
+                    <td class="px-4 py-2 text-right font-medium align-top">${paidColumnHtml}</td>
+                    <td class="px-4 py-2 text-right align-top ${diff < 0 ? 'text-red-600 font-bold' : (diff > 0 ? 'text-blue-600 font-bold' : '')}">${diff !== 0 ? ImmoApp.ui.formatCurrency(diff) : '0,00 €'}</td>
+                    <td class="px-4 py-2 text-right align-top">${statusText}</td>
+                </tr>
+            `;
+        }
+        document.getElementById('modal-monthly-details').classList.remove('hidden');
+    }
+};

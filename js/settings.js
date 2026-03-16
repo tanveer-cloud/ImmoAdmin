@@ -6,11 +6,44 @@ window.ImmoApp.settings = {
         if (container && container.innerHTML.includes("Lade Module...")) {
             container.innerHTML = `
                 <div class="mb-6">
-                    <h2 class="text-2xl font-bold text-gray-800">Datenverwaltung, Backup & Reset</h2>
-                    <p class="text-gray-500 text-sm">Hier kannst du deine Daten sichern, alte Jahre aufräumen oder Backups einspielen.</p>
+                    <h2 class="text-2xl font-bold text-gray-800">Datenverwaltung, Cloud-Konfiguration & Reset</h2>
+                    <p class="text-gray-500 text-sm">Hier kannst du deine Daten sichern, eine Google API-Konfiguration hinterlegen oder Backups einspielen.</p>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    
+                    <!-- Google API / Cloud-Konfiguration -->
+                    <div class="bg-white p-6 rounded-lg shadow-sm border border-indigo-100 flex flex-col justify-between">
+                        <div>
+                            <h3 class="text-lg font-bold text-indigo-800 mb-2">🔑 Google API & Drive</h3>
+                            <p class="text-sm text-gray-600 mb-4 border-b pb-4">
+                                Trage hier deine Google-API-Daten ein, wenn du die App später mit Google Drive verbinden möchtest
+                                (z.B. wenn sie über GitHub Pages unter https läuft). Lokal bleiben diese Werte sicher im Browser gespeichert.
+                            </p>
+
+                            <div class="space-y-3 mb-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">OAuth Client ID</label>
+                                    <input type="text" id="google-client-id" class="w-full border rounded p-2 text-xs bg-gray-50 font-mono" placeholder="1234567890-abc.apps.googleusercontent.com">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+                                    <input type="text" id="google-api-key" class="w-full border rounded p-2 text-xs bg-gray-50 font-mono" placeholder="AIzaSy...">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Drive-Ordner (optional)</label>
+                                    <input type="text" id="google-drive-folder" class="w-full border rounded p-2 text-xs bg-gray-50" placeholder="z.B. ImmoAdmin-Daten">
+                                    <p class="text-[11px] text-gray-400 mt-1">
+                                        Hinweis: Dient nur als Merktext. Die eigentliche Ordner-Verknüpfung wird in einem späteren Schritt umgesetzt.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button onclick="ImmoApp.settings.saveGoogleConfig()" class="bg-indigo-600 text-white px-4 py-3 rounded-lg shadow font-bold w-full hover:bg-indigo-700 transition flex justify-center items-center gap-2">
+                            <span>💾</span> Google-Konfiguration speichern
+                        </button>
+                    </div>
                     
                     <div class="bg-white p-6 rounded-lg shadow-sm border border-blue-100">
                         <h3 class="text-lg font-bold text-blue-800 mb-2">📥 Selektives Backup (Export)</h3>
@@ -89,6 +122,49 @@ window.ImmoApp.settings = {
                     </div>
                 </div>
             `;
+        }
+    },
+
+    // Google-Konfiguration laden
+    loadGoogleConfig: async function() {
+        if (!ImmoApp.db || !ImmoApp.db.instance) return;
+        const db = ImmoApp.db.instance;
+        try {
+            const clientId = await db.settings.get("googleClientId");
+            const apiKey = await db.settings.get("googleApiKey");
+            const driveFolder = await db.settings.get("googleDriveFolder");
+
+            const clientInput = document.getElementById("google-client-id");
+            const keyInput = document.getElementById("google-api-key");
+            const folderInput = document.getElementById("google-drive-folder");
+
+            if (clientInput && clientId && clientId.value) clientInput.value = clientId.value;
+            if (keyInput && apiKey && apiKey.value) keyInput.value = apiKey.value;
+            if (folderInput && driveFolder && driveFolder.value) folderInput.value = driveFolder.value;
+        } catch (e) {
+            console.error("Fehler beim Laden der Google-Konfiguration:", e);
+        }
+    },
+
+    // Google-Konfiguration speichern
+    saveGoogleConfig: async function() {
+        if (!ImmoApp.db || !ImmoApp.db.instance) {
+            alert("Datenbank noch nicht initialisiert. Bitte Seite neu laden.");
+            return;
+        }
+        const db = ImmoApp.db.instance;
+        const clientId = document.getElementById("google-client-id")?.value || "";
+        const apiKey = document.getElementById("google-api-key")?.value || "";
+        const driveFolder = document.getElementById("google-drive-folder")?.value || "";
+
+        try {
+            await db.settings.put({ key: "googleClientId", value: clientId });
+            await db.settings.put({ key: "googleApiKey", value: apiKey });
+            await db.settings.put({ key: "googleDriveFolder", value: driveFolder });
+            alert("Google-Konfiguration wurde lokal gespeichert.");
+        } catch (e) {
+            console.error("Fehler beim Speichern der Google-Konfiguration:", e);
+            alert("Fehler beim Speichern der Google-Konfiguration.");
         }
     },
 

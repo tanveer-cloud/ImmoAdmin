@@ -15,26 +15,49 @@
 <body class="bg-gray-50 text-gray-800 font-sans min-h-screen flex flex-col">
 
     <header class="bg-white shadow-sm sticky top-0 z-10">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center h-16">
-            <div class="flex items-center gap-4">
-                <h1 class="text-xl font-bold text-blue-600">ImmoAdmin</h1>
-				<input type="text" id="global-search" placeholder="Suche (Enter drücken)..." class="bg-gray-100 border-none rounded text-sm p-2 w-48 md:w-64 focus:ring-2 focus:ring-blue-500" onkeyup="ImmoApp.search.handleInput(event)">
-                <select id="global-year-select" class="bg-gray-100 border-none rounded text-sm font-medium p-2 cursor-pointer">
-                    <option value="2023">Jahr 2023</option>
-                    <option value="2024" selected>Jahr 2024</option>
-                    <option value="2025">Jahr 2025</option>
-                    <option value="2026">Jahr 2026</option>
-                </select>
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row md:items-center md:justify-between gap-2 py-2">
+            <!-- Logo, Suche, Jahr -->
+            <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-4">
+                <div class="flex items-center gap-2">
+                    <h1 class="text-xl font-bold text-blue-600">ImmoAdmin</h1>
+                </div>
+                <div class="flex items-center gap-2">
+                    <input type="text" id="global-search" placeholder="Suche (Enter drücken)..." class="flex-1 bg-gray-100 border-none rounded text-sm p-2 w-full md:w-64 focus:ring-2 focus:ring-blue-500" onkeyup="ImmoApp.search.handleInput(event)">
+                    <select id="global-year-select" class="bg-gray-100 border-none rounded text-sm font-medium p-2 cursor-pointer">
+                        <option value="2023">Jahr 2023</option>
+                        <option value="2024" selected>Jahr 2024</option>
+                        <option value="2025">Jahr 2025</option>
+                        <option value="2026">Jahr 2026</option>
+                    </select>
+                </div>
             </div>
-<nav class="flex space-x-4 overflow-x-auto border-b">
-    <button onclick="ImmoApp.ui.switchTab('dashboard')" id="nav-dashboard" class="nav-btn tab-active pb-1 px-2 text-sm">Dashboard</button>
-    <button onclick="ImmoApp.ui.switchTab('tenants')" id="nav-tenants" class="nav-btn pb-1 px-2 text-sm">Mieter & Objekte</button>
-    <button onclick="ImmoApp.ui.switchTab('banking')" id="nav-banking" class="nav-btn pb-1 px-2 text-sm">Kontoauszug</button>
-    <button onclick="ImmoApp.ui.switchTab('utilities')" id="nav-utilities" class="nav-btn pb-1 px-2 text-sm text-gray-600">📊 Nebenkosten</button>
-    <button onclick="ImmoApp.ui.switchTab('meters')" id="nav-meters" class="nav-btn pb-1 px-2 text-sm text-gray-600">🔢 Zähler</button>
-    <button onclick="ImmoApp.ui.switchTab('maintenance')" id="nav-maintenance" class="nav-btn pb-1 px-2 text-sm">Wartung</button>
-    <button onclick="ImmoApp.ui.switchTab('settings')" id="nav-settings" class="nav-btn pb-1 px-2 text-sm text-gray-500">⚙️ Backup</button>
-</nav>
+
+            <!-- Desktop-Tabs -->
+            <nav class="hidden md:flex space-x-4">
+                <button onclick="ImmoApp.ui.switchTab('dashboard')" id="nav-dashboard" class="nav-btn tab-active pb-1 px-2 text-sm">Dashboard</button>
+                <button onclick="ImmoApp.ui.switchTab('tenants')" id="nav-tenants" class="nav-btn pb-1 px-2 text-sm">Mieter & Objekte</button>
+                <button onclick="ImmoApp.ui.switchTab('banking')" id="nav-banking" class="nav-btn pb-1 px-2 text-sm">Kontoauszug</button>
+                <button onclick="ImmoApp.ui.switchTab('utilities')" id="nav-utilities" class="nav-btn pb-1 px-2 text-sm text-gray-600">📊 Nebenkosten</button>
+                <button onclick="ImmoApp.ui.switchTab('meters')" id="nav-meters" class="nav-btn pb-1 px-2 text-sm text-gray-600">🔢 Zähler</button>
+                <button onclick="ImmoApp.ui.switchTab('maintenance')" id="nav-maintenance" class="nav-btn pb-1 px-2 text-sm">Wartung</button>
+                <button onclick="ImmoApp.ui.switchTab('settings')" id="nav-settings" class="nav-btn pb-1 px-2 text-sm text-gray-500">⚙️ Backup</button>
+            </nav>
+
+            <!-- Mobile-Menü -->
+            <div class="md:hidden flex justify-end">
+                <button id="mobile-nav-toggle" class="p-2 border rounded text-gray-700" aria-label="Menü">
+                    ☰
+                </button>
+            </div>
+            <div id="mobile-nav-menu" class="md:hidden hidden mt-2 border-t pt-2 flex flex-col gap-1">
+                <button onclick="ImmoApp.ui.switchTab('dashboard'); ImmoApp.ui.closeMobileNav && ImmoApp.ui.closeMobileNav();" class="text-left nav-btn tab-active py-1 px-2 text-sm">Dashboard</button>
+                <button onclick="ImmoApp.ui.switchTab('tenants'); ImmoApp.ui.closeMobileNav && ImmoApp.ui.closeMobileNav();" class="text-left nav-btn py-1 px-2 text-sm">Mieter & Objekte</button>
+                <button onclick="ImmoApp.ui.switchTab('banking'); ImmoApp.ui.closeMobileNav && ImmoApp.ui.closeMobileNav();" class="text-left nav-btn py-1 px-2 text-sm">Kontoauszug</button>
+                <button onclick="ImmoApp.ui.switchTab('utilities'); ImmoApp.ui.closeMobileNav && ImmoApp.ui.closeMobileNav();" class="text-left nav-btn py-1 px-2 text-sm">📊 Nebenkosten</button>
+                <button onclick="ImmoApp.ui.switchTab('meters'); ImmoApp.ui.closeMobileNav && ImmoApp.ui.closeMobileNav();" class="text-left nav-btn py-1 px-2 text-sm">🔢 Zähler</button>
+                <button onclick="ImmoApp.ui.switchTab('maintenance'); ImmoApp.ui.closeMobileNav && ImmoApp.ui.closeMobileNav();" class="text-left nav-btn py-1 px-2 text-sm">Wartung</button>
+                <button onclick="ImmoApp.ui.switchTab('settings'); ImmoApp.ui.closeMobileNav && ImmoApp.ui.closeMobileNav();" class="text-left nav-btn py-1 px-2 text-sm">⚙️ Backup</button>
+            </div>
         </div>
     </header>
 

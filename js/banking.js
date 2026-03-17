@@ -339,6 +339,26 @@ window.ImmoApp.banking = {
         }
     },
 
+    createTenantFromTx: async function(txId) {
+        const db = ImmoApp.db.instance;
+        const tx = await db.transactions.get(txId);
+        if (!tx) return alert("Buchung nicht gefunden.");
+        if (!ImmoApp.tenants || !ImmoApp.tenants.showTenantModal) {
+            alert("Mietermodul ist nicht geladen.");
+            return;
+        }
+
+        const defaultName = tx.name || "";
+        const defaultIban = tx.iban || "";
+        const defaultDate = tx.date || "";
+        const defaultRent = "";
+
+        ImmoApp.ui.switchTab('tenants');
+        setTimeout(() => {
+            ImmoApp.tenants.showTenantModal(null, defaultName, defaultIban, defaultDate, defaultRent);
+        }, 50);
+    },
+
     splitToDepositAndRent: async function(txId) {
         const db = ImmoApp.db.instance;
         const tx = await db.transactions.get(txId);
@@ -457,6 +477,7 @@ window.ImmoApp.banking = {
                     <td class="px-4 py-3 align-top text-right font-bold ${amountColor} whitespace-nowrap">${ImmoApp.ui.formatCurrency(tx.amount)}</td>
                     <td class="px-4 py-3 align-top">${selectHtml}</td>
                     <td class="px-4 py-3 align-top text-right space-x-1">
+                        <button onclick="ImmoApp.banking.createTenantFromTx(${tx.id})" class="text-xs bg-green-50 border border-green-300 px-2 py-1 rounded hover:bg-green-100" title="Neuen Mieter aus dieser Buchung anlegen">👤+</button>
                         <button onclick="ImmoApp.banking.splitToDepositAndRent(${tx.id})" class="text-xs bg-gray-50 border border-gray-300 px-2 py-1 rounded hover:bg-gray-100" title="Zahlung in Kaution + Miete aufteilen">➗</button>
                         <button onclick="ImmoApp.banking.deleteTx(${tx.id})" class="text-red-500 hover:bg-red-50 p-1 rounded" title="Buchung löschen">🗑️</button>
                     </td>

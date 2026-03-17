@@ -280,7 +280,129 @@ window.ImmoApp.settings = {
         lastSyncAt: null,
         tokenClient: null,
         gapiInited: false,
-        gisInited: false
+        gisInited: false,
+        cryptSupported: typeof window !== "undefined" && !!(window.crypto && window.crypto.subtle)
+    },
+
+    // --- Hilfsfunktionen für Verschlüsselung (nur für Drive) ---
+    _toBase64: function(buffer) {
+        let binary = "";
+        const bytes = new Uint8Array(buffer);
+        const len = bytes.byteLength;
+        for (let i = 0; i < len; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return btoa(binary);
+    },
+
+    _fromBase64: function(base64) {
+        const binary = atob(base64);
+        const len = binary.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes.buffer;
+    },
+
+    _askPassword: function(message) {
+        const pw = prompt(message || "Bitte ein Passwort für die Verschlüsselung eingeben:");
+        if (!pw) {
+            alert("Aktion abgebrochen, da kein Passwort eingegeben wurde.");
+            return null;
+        }
+        if (pw.length < 6) {
+            alert("Bitte ein Passwort mit mindestens 6 Zeichen wählen.");
+            return null;
+        }
+        return pw;
+    },
+
+    _deriveKey: async function(password, salt) {
+        const enc = new TextEncoder();
+        const keyMaterial = await crypto.subtle.importKey(
+            "raw",
+            enc.encode(password),
+            { name: "PBKDF2" },
+            false,
+            ["deriveKey"]
+        );
+        return crypto.subtle.deriveKey(
+            {
+                name: "PBKDF2",
+                salt: salt,
+                iterations: 100000,
+                hash: "SHA-256"
+            },
+            keyMaterial,
+            { name: "AES-GCM", length: 256 },
+            false,
+            ["encrypt", "decrypt"]
+        );
+    },
+
+    encryptForDrive: async function(plainObject) {
+        if (!this._driveState.cryptSupported) {
+            alert("Die Verschlüsselung wird in diesem Browser nicht unterstützt (kein WebCrypto).");
+            return null;
+        }
+        const password = this._askPassword("Passwort für das verschlüsselte Drive‑Backup eingeben:");
+        if (!password) return null;
+
+        const enc = new TextEncoder();
+        const data = enc.encode(JSON.stringify(plainObject));
+        const salt = crypto.getRandomValues(new Uint8Array(16));
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const key = await this._deriveKey(password, salt);
+        const cipher = await crypto.subtle.encrypt(
+            { name: "AES-GCM", iv: iv },
+            key,
+            data
+        );
+
+        return {
+            version: 1,
+            algo: "AES-GCM",
+            salt: this._toBase64(salt),
+            iv: this._toBase64(iv),
+            data: this._toBase64(cipher)
+        };
+    },
+
+    decryptFromDrive: async function(envelope) {
+        // Wenn es wie ein altes, unverschlüsseltes Backup aussieht, einfach zurückgeben
+        if (!envelope || typeof envelope !== "object" || !envelope.version || !envelope.algo || !envelope.data) {
+            return envelope;
+        }
+        if (!this._driveState.cryptSupported) {
+            alert("Die Entschlüsselung wird in diesem Browser nicht unterstützt (kein WebCrypto).");
+            return null;
+        }
+        if (envelope.algo !== "AES-GCM") {
+            alert("Unbekanntes Verschlüsselungsformat.");
+            return null;
+        }
+        const password = this._askPassword("Passwort für das Drive‑Backup zur Entschlüsselung eingeben:");
+        if (!password) return null;
+
+        try {
+            const salt = new Uint8Array(this._fromBase64(envelope.salt));
+            const iv = new Uint8Array(this._fromBase64(envelope.iv));
+            const cipher = this._fromBase64(envelope.data);
+            const key = await this._deriveKey(password, salt);
+            const plainBuf = await crypto.subtle.decrypt(
+                { name: "AES-GCM", iv: iv },
+                key,
+                cipher
+            );
+            const dec = new TextDecoder();
+            const json = dec.decode(plainBuf);
+            return JSON.parse(json);
+        } catch (e) {
+            console.error("Fehler bei der Entschlüsselung", e);
+            alert("Das Backup konnte nicht entschlüsselt werden. Passwort korrekt?");
+            return null;
+        }
     },
 
     ensureDriveConfig: async function() {
@@ -351,7 +473,9 @@ window.ImmoApp.settings = {
             return;
         }
         const data = await this.buildExportObject();
-        const jsonString = JSON.stringify(data, null, 2);
+        const encrypted = await this.encryptForDrive(data);
+        if (!encrypted) return;
+        const jsonString = JSON.stringify(encrypted, null, 2);
 
         const boundary = "foo_bar_baz_" + Date.now();
         const delimiter = "\r\n--" + boundary + "\r\n";
@@ -409,11 +533,22 @@ window.ImmoApp.settings = {
                 fileId: file.id,
                 alt: "media"
             });
-            const data = getResp.result;
+            let data = getResp.result;
             if (!data || typeof data !== "object") {
                 alert("Die geladene Datei konnte nicht als ImmoAdmin-Backup erkannt werden.");
                 return;
             }
+
+            // Versuchen zu entschlüsseln, falls verschlüsselt
+            const maybeDecrypted = await this.decryptFromDrive(data);
+            if (!maybeDecrypted) return;
+            data = maybeDecrypted;
+
+            if (!data || typeof data !== "object") {
+                alert("Das entschlüsselte Backup ist ungültig.");
+                return;
+            }
+
             if (!confirm("Backup von Google Drive laden und in die lokale Datenbank importieren? Bereits vorhandene Einträge mit gleicher ID werden überschrieben.")) {
                 return;
             }

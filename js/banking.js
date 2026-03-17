@@ -1,6 +1,7 @@
 window.ImmoApp = window.ImmoApp || {};
 
 window.ImmoApp.banking = {
+    tenantFilterId: null,
     setupHTML: function() {
         const container = document.getElementById("banking-content");
         if (container.innerHTML.includes("Lade Module...")) {
@@ -20,11 +21,11 @@ window.ImmoApp.banking = {
                     <div class="flex gap-4 w-full md:w-2/3">
                         <div class="w-1/2">
                             <label class="block text-xs font-bold text-gray-500 mb-1">Suche (Name, Verwendungszweck)</label>
-                            <input type="text" id="banking-text-filter" placeholder="Suchbegriff..." class="w-full border rounded p-2 text-sm" onkeyup="ImmoApp.banking.render()">
+                            <input type="text" id="banking-text-filter" placeholder="Suchbegriff..." class="w-full border rounded p-2 text-sm" onkeyup="ImmoApp.banking.onSearchChange()">
                         </div>
                         <div class="w-1/2">
                             <label class="block text-xs font-bold text-gray-500 mb-1">Status-Filter</label>
-                            <select id="banking-status-filter" class="w-full border rounded p-2 text-sm" onchange="ImmoApp.banking.render()">
+                            <select id="banking-status-filter" class="w-full border rounded p-2 text-sm" onchange="ImmoApp.banking.onStatusChange()">
                                 <option value="ALL">Alle anzeigen</option>
                                 <option value="UNMATCHED">⚠️ Nur Offene (Nicht zugeordnet)</option>
                                 <option value="RENT">✅ Mieten</option>
@@ -47,7 +48,7 @@ window.ImmoApp.banking = {
                                 <th class="px-4 py-3 text-left font-bold text-gray-600">Details (Sender/Empfänger & Zweck)</th>
                                 <th class="px-4 py-3 text-right font-bold text-gray-600">Betrag</th>
                                 <th class="px-4 py-3 text-left w-64 font-bold text-gray-600">Kategorie / Zuweisung</th>
-                                <th class="px-4 py-3 text-right w-16 font-bold text-gray-600"></th>
+                                <th class="px-4 py-3 text-right w-28 font-bold text-gray-600"></th>
                             </tr>
                         </thead>
                         <tbody id="banking-table-body" class="bg-white divide-y divide-gray-200"></tbody>
@@ -55,6 +56,18 @@ window.ImmoApp.banking = {
                 </div>
             `;
         }
+    },
+
+    onSearchChange: function() {
+        // Manuelle Suche hebt die Filterung auf einen bestimmten Mieter wieder auf
+        this.tenantFilterId = null;
+        this.render();
+    },
+
+    onStatusChange: function() {
+        // Statuswechsel soll ebenfalls alle Mieter berücksichtigen
+        this.tenantFilterId = null;
+        this.render();
     },
 
     importCSV: async function() {
@@ -278,6 +291,8 @@ window.ImmoApp.banking = {
         const db = ImmoApp.db.instance;
         const tx = await db.transactions.get(txId);
         
+        const oldCategory = tx.category;
+
         await db.transactions.update(txId, { 
             category: category, 
             matchedTenantId: tenantId ? parseInt(tenantId) : null 
@@ -296,6 +311,19 @@ window.ImmoApp.banking = {
             }
         }
 
+        // Wenn eine Buchung vorher als Nebenkosten lief und jetzt nicht mehr,
+        // sollten wir den dazugehörigen Utilities-Eintrag wieder entfernen
+        if (oldCategory === 'UTILITY' && category !== 'UTILITY') {
+            const candidates = await db.utilities.where({
+                name: tx.name + ' - ' + tx.purpose,
+                amount: Math.abs(tx.amount),
+                year: tx.year
+            }).toArray();
+            for (const u of candidates) {
+                await db.utilities.delete(u.id);
+            }
+        }
+
         // Falls es aus dem Auto-Match kommt, rendern wir erst ganz am Ende 1x, um Ruckler zu vermeiden!
         if (!skipRender) {
             this.render();
@@ -311,6 +339,54 @@ window.ImmoApp.banking = {
         }
     },
 
+    splitToDepositAndRent: async function(txId) {
+        const db = ImmoApp.db.instance;
+        const tx = await db.transactions.get(txId);
+        if (!tx) return alert("Buchung nicht gefunden.");
+        if (tx.amount <= 0) return alert("Nur Zahlungseingänge können gesplittet werden.");
+
+        const input = prompt(`Wieviel von ${ImmoApp.ui.formatCurrency(tx.amount)} ist Kaution?`, "0");
+        if (input === null) return;
+        const dep = parseFloat(input.replace(',', '.'));
+        if (isNaN(dep) || dep <= 0 || dep >= tx.amount) {
+            alert("Ungültiger Kautionsbetrag. Er muss > 0 und < Gesamtbetrag sein.");
+            return;
+        }
+        const rentPart = tx.amount - dep;
+
+        // Kaution
+        await db.transactions.add({
+            date: tx.date,
+            amount: dep,
+            name: tx.name,
+            purpose: (tx.purpose || '') + ' (Kaution)',
+            iban: tx.iban,
+            matchedTenantId: tx.matchedTenantId || null,
+            category: 'DEPOSIT',
+            year: tx.year,
+            importBatchId: (tx.importBatchId || 'split') + '_deposit'
+        });
+
+        // Miete
+        await db.transactions.add({
+            date: tx.date,
+            amount: rentPart,
+            name: tx.name,
+            purpose: (tx.purpose || '') + ' (Miete)',
+            iban: tx.iban,
+            matchedTenantId: tx.matchedTenantId || null,
+            category: 'RENT',
+            year: tx.year,
+            importBatchId: (tx.importBatchId || 'split') + '_rent'
+        });
+
+        // Ursprüngliche Zahlung ignorieren, damit sie nicht doppelt gezählt wird
+        await db.transactions.update(txId, { category: 'IGNORE', matchedTenantId: null });
+
+        this.render();
+        if (window.ImmoApp.dashboard) ImmoApp.dashboard.render();
+    },
+
     render: async function() {
         this.setupHTML();
         const db = ImmoApp.db.instance;
@@ -321,6 +397,11 @@ window.ImmoApp.banking = {
 
         let txs = await db.transactions.where('year').equals(currentYear).reverse().toArray();
         const tenants = await db.tenants.toArray();
+
+        // wenn aus dem Dashboard ein bestimmter Mieter gewählt wurde, zuerst nach matchedTenantId filtern
+        if (this.tenantFilterId != null) {
+            txs = txs.filter(tx => tx.matchedTenantId === this.tenantFilterId);
+        }
 
         if (filterStatus !== "ALL") txs = txs.filter(tx => tx.category === filterStatus);
         if (filterText) {
@@ -354,6 +435,7 @@ window.ImmoApp.banking = {
                 selectHtml += `<option value="${t.id}" data-cat="RENT" ${isSelected}>${t.name}</option>`;
             });
             selectHtml += `</optgroup>`;
+            selectHtml += `<option value="" data-cat="DEPOSIT" ${tx.category === 'DEPOSIT' ? 'selected' : ''}>🔒 Kaution</option>`;
             selectHtml += `<option value="" data-cat="UTILITY" ${tx.category === 'UTILITY' ? 'selected' : ''}>📊 Ist Nebenkosten-Ausgabe</option>`;
             selectHtml += `<option value="" data-cat="IGNORE" ${tx.category === 'IGNORE' ? 'selected' : ''}>🗑️ Ignorieren / Privat</option>`;
             selectHtml += `</select>`;
@@ -374,8 +456,9 @@ window.ImmoApp.banking = {
                     </td>
                     <td class="px-4 py-3 align-top text-right font-bold ${amountColor} whitespace-nowrap">${ImmoApp.ui.formatCurrency(tx.amount)}</td>
                     <td class="px-4 py-3 align-top">${selectHtml}</td>
-                    <td class="px-4 py-3 align-top text-right">
-                        <button onclick="ImmoApp.banking.deleteTx(${tx.id})" class="text-red-500 hover:bg-red-50 p-1 rounded">🗑️</button>
+                    <td class="px-4 py-3 align-top text-right space-x-1">
+                        <button onclick="ImmoApp.banking.splitToDepositAndRent(${tx.id})" class="text-xs bg-gray-50 border border-gray-300 px-2 py-1 rounded hover:bg-gray-100" title="Zahlung in Kaution + Miete aufteilen">➗</button>
+                        <button onclick="ImmoApp.banking.deleteTx(${tx.id})" class="text-red-500 hover:bg-red-50 p-1 rounded" title="Buchung löschen">🗑️</button>
                     </td>
                 </tr>
             `;

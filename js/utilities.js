@@ -11,13 +11,42 @@ window.ImmoApp.utilities = {
                 </div>
 
                 <div id="util-view-costs">
-                    <div class="flex justify-between items-center mb-6">
-                        <div>
-                            <h2 class="text-2xl font-bold text-gray-800">WG-Rentabilitäts-Check & Kosten-Verteiler (<span class="year-label"></span>)</h2>
+                    <div class="flex flex-col gap-4 mb-6">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <h2 class="text-2xl font-bold text-gray-800">WG-Rentabilitäts-Check & Kosten-Verteiler (<span class="year-label"></span>)</h2>
+                            </div>
+                            <select id="util-prop-select" class="border rounded p-2 text-sm bg-white font-bold shadow-sm" onchange="ImmoApp.utilities.renderCosts()">
+                                <option value="ALL">-- Alle Objekte --</option>
+                            </select>
                         </div>
-                        <select id="util-prop-select" class="border rounded p-2 text-sm bg-white font-bold shadow-sm" onchange="ImmoApp.utilities.renderCosts()">
-                            <option value="ALL">-- Alle Objekte --</option>
-                        </select>
+
+                        <!-- Manuelle Rechnung erfassen -->
+                        <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-4">
+                            <h3 class="text-sm font-bold text-gray-700 mb-2">+ Manuelle Nebenkosten-Rechnung erfassen</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-600 mb-1">Datum</label>
+                                    <input type="date" id="util-man-date" class="w-full border rounded p-2 text-xs">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-600 mb-1">Lieferant / Rechnungstext</label>
+                                    <input type="text" id="util-man-name" placeholder="z.B. Stadtwerke, Heizkostenabrechnung" class="w-full border rounded p-2 text-xs">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-600 mb-1">Betrag (€)</label>
+                                    <input type="number" step="0.01" id="util-man-amount" class="w-full border rounded p-2 text-xs" placeholder="z.B. 1200">
+                                </div>
+                                <div class="flex gap-2">
+                                    <button onclick="ImmoApp.utilities.addManualUtility()" class="w-full md:w-auto bg-blue-600 text-white px-4 py-2 rounded text-xs font-bold shadow hover:bg-blue-700 whitespace-nowrap">
+                                        💾 Rechnung hinzufügen
+                                    </button>
+                                </div>
+                            </div>
+                            <p class="text-[11px] text-gray-400 mt-1">
+                                Hinweis: Die detaillierte Objektzuordnung, Kategorie und Verteilung kannst du in der Tabelle unten nachtragen.
+                            </p>
+                        </div>
                     </div>
 
                     <div id="wg-check-container" class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -94,18 +123,18 @@ window.ImmoApp.utilities = {
                             <button onclick="document.getElementById('modal-wg-check').classList.add('hidden')" class="text-gray-500 hover:text-gray-800 font-bold text-xl">&times;</button>
                         </div>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-                            <div>
+                            <div class="flex flex-col min-h-0">
                                 <h4 class="font-bold text-blue-800 border-b-2 border-blue-200 pb-2 mb-3">Welche Mieter haben bezahlt?</h4>
-                                <ul id="wg-check-income-list" class="space-y-3 text-sm"></ul>
-                                <div class="mt-4 pt-3 border-t-2 border-blue-800 flex justify-between font-bold text-blue-800 text-lg">
+                                <ul id="wg-check-income-list" class="space-y-3 text-sm overflow-y-auto max-h-72 min-h-0 pr-2 border border-blue-100 rounded"></ul>
+                                <div class="mt-4 pt-3 border-t-2 border-blue-800 flex justify-between font-bold text-blue-800 text-lg flex-shrink-0">
                                     <span>Summe Einnahmen:</span>
                                     <span id="wg-check-income-sum">0,00 €</span>
                                 </div>
                             </div>
-                            <div>
+                            <div class="flex flex-col min-h-0">
                                 <h4 class="font-bold text-orange-800 border-b-2 border-orange-200 pb-2 mb-3">Welche Rechnungen fielen an?</h4>
-                                <ul id="wg-check-costs-list" class="space-y-3 text-sm"></ul>
-                                <div class="mt-4 pt-3 border-t-2 border-orange-800 flex justify-between font-bold text-orange-800 text-lg">
+                                <ul id="wg-check-costs-list" class="space-y-3 text-sm overflow-y-auto max-h-72 min-h-0 pr-2 border border-orange-100 rounded"></ul>
+                                <div class="mt-4 pt-3 border-t-2 border-orange-800 flex justify-between font-bold text-orange-800 text-lg flex-shrink-0">
                                     <span>Summe Ausgaben:</span>
                                     <span id="wg-check-costs-sum">0,00 €</span>
                                 </div>
@@ -138,6 +167,42 @@ window.ImmoApp.utilities = {
         }
     },
 
+    getUtilityAssignmentRules: async function() {
+        const db = ImmoApp.db.instance;
+        const r = await db.settings.get("utilityAssignmentRules");
+        try { return r && r.value ? JSON.parse(r.value) : {}; } catch (e) { return {}; }
+    },
+
+    saveUtilityAssignmentRule: async function(namePart, update) {
+        const db = ImmoApp.db.instance;
+        const rules = await this.getUtilityAssignmentRules();
+        namePart = (namePart || "").trim();
+        if (!namePart) return;
+        rules[namePart] = rules[namePart] || {};
+        if (update.propertyId !== undefined) rules[namePart].propertyId = update.propertyId;
+        if (update.category !== undefined) rules[namePart].category = update.category;
+        if (update.splitKey !== undefined) rules[namePart].splitKey = update.splitKey;
+        await db.settings.put({ key: "utilityAssignmentRules", value: JSON.stringify(rules) });
+    },
+
+    applyRulesToUtility: async function(u) {
+        const namePart = (u.name || "").split(' - ')[0].trim() || (u.name || "").trim();
+        if (!namePart) return u;
+        const rules = await this.getUtilityAssignmentRules();
+        const rule = rules[namePart];
+        if (!rule) return u;
+        const db = ImmoApp.db.instance;
+        const upd = {};
+        if ((u.propertyId == null || u.propertyId === '') && rule.propertyId != null) upd.propertyId = rule.propertyId;
+        if ((!u.category || u.category === '') && rule.category) upd.category = rule.category;
+        if ((!u.splitKey || u.splitKey === '') && rule.splitKey) upd.splitKey = rule.splitKey;
+        if (Object.keys(upd).length) {
+            await db.utilities.update(u.id, upd);
+            u = { ...u, ...upd };
+        }
+        return u;
+    },
+
     updateUtil: async function(utilId, field, value) {
         const db = ImmoApp.db.instance;
         let updateData = {};
@@ -145,7 +210,68 @@ window.ImmoApp.utilities = {
         if(field === 'category') updateData.category = value;
         if(field === 'splitKey') updateData.splitKey = value;
         await db.utilities.update(utilId, updateData);
-        this.renderCosts(); // Render neu für den WG Check
+        const util = await db.utilities.get(utilId);
+        if (util && util.name) {
+            const namePart = (util.name || "").split(' - ')[0].trim();
+            await this.saveUtilityAssignmentRule(namePart, updateData);
+        }
+        this.renderCosts();
+    },
+
+    addManualUtility: async function() {
+        const db = ImmoApp.db.instance;
+        const currentYear = ImmoApp.ui.currentYear;
+
+        const dateInput = document.getElementById("util-man-date");
+        const nameInput = document.getElementById("util-man-name");
+        const amountInput = document.getElementById("util-man-amount");
+
+        const rawDate = dateInput?.value || "";
+        const name = (nameInput?.value || "").trim();
+        const amountStr = amountInput?.value || "";
+
+        if (!name || !amountStr) {
+            alert("Bitte mindestens einen Rechnungstext und einen Betrag eingeben.");
+            return;
+        }
+
+        const amount = parseFloat(amountStr.replace(',', '.'));
+        if (isNaN(amount) || amount <= 0) {
+            alert("Bitte einen gültigen Betrag größer 0 eingeben.");
+            return;
+        }
+
+        // Datum in deutsches Format TT.MM.JJ/JJJJ umwandeln, falls gesetzt
+        let prettyDate = "";
+        if (rawDate) {
+            const d = new Date(rawDate);
+            if (!isNaN(d.getTime())) {
+                const dd = String(d.getDate()).padStart(2, '0');
+                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                const yy = String(d.getFullYear()).slice(-2);
+                prettyDate = `${dd}.${mm}.${yy}`;
+            }
+        }
+
+        const fullName = prettyDate ? `${name} - ${prettyDate}` : name;
+
+        const newId = await db.utilities.add({
+            name: fullName,
+            amount: amount,
+            year: currentYear,
+            importBatchId: 'manual',
+            propertyId: null
+        });
+        let newUtil = await db.utilities.get(newId);
+        if (newUtil) {
+            newUtil = await this.applyRulesToUtility(newUtil);
+        }
+
+        if (dateInput) dateInput.value = "";
+        if (nameInput) nameInput.value = "";
+        if (amountInput) amountInput.value = "";
+
+        this.renderCosts();
     },
 
     renderCosts: async function() {
@@ -162,6 +288,9 @@ window.ImmoApp.utilities = {
         });
 
         let utils = await db.utilities.where('year').equals(currentYear).toArray();
+        for (let i = 0; i < utils.length; i++) {
+            utils[i] = await this.applyRulesToUtility(utils[i]);
+        }
         let allTenants = await db.tenants.toArray();
 
         // Wenn ein spezielles Objekt gewählt ist, filtere!

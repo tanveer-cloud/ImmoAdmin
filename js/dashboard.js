@@ -52,9 +52,27 @@ window.ImmoApp.dashboard = {
                     </div>
                 </div>
                 
-                <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
-                    <h3 class="text-lg font-bold mb-4 text-gray-800">📊 Mietstatus im gewählten Jahr</h3>
-                    <ul id="dash-status-list" class="space-y-2 text-sm"></ul>
+                <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-100 space-y-4">
+                    <div>
+                        <h3 class="text-lg font-bold mb-2 text-gray-800">📊 Mietstatus im gewählten Jahr</h3>
+                        <ul id="dash-status-list" class="space-y-2 text-sm"></ul>
+                    </div>
+                    <div class="border-t pt-4">
+                        <h3 class="text-lg font-bold mb-2 text-gray-800">💶 Bilanz je Mieter (Jahr)</h3>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full text-xs md:text-sm border border-gray-200 rounded">
+                                <thead class="bg-gray-50 text-gray-600">
+                                    <tr>
+                                        <th class="px-3 py-2 text-left">Mieter</th>
+                                        <th class="px-3 py-2 text-right">Soll</th>
+                                        <th class="px-3 py-2 text-right">Ist</th>
+                                        <th class="px-3 py-2 text-right">Bilanz</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="dash-bilanz-body" class="bg-white"></tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
                 
                 <div id="modal-monthly-details" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50 overflow-y-auto">
@@ -90,7 +108,7 @@ window.ImmoApp.dashboard = {
         }
     },
 
-    jumpToBanking: function(tenantName) {
+    jumpToBanking: function(tenantId, tenantName) {
         document.getElementById('modal-monthly-details').classList.add('hidden');
         ImmoApp.ui.switchTab('banking');
         setTimeout(() => {
@@ -98,8 +116,10 @@ window.ImmoApp.dashboard = {
                 const filterInput = document.getElementById('banking-text-filter');
                 const statusFilter = document.getElementById('banking-status-filter');
                 if(filterInput && statusFilter) {
-                    filterInput.value = tenantName;
+                    // Textsuche leeren, stattdessen auf Tenant-ID filtern
+                    filterInput.value = "";
                     statusFilter.value = "ALL";
+                    ImmoApp.banking.tenantFilterId = tenantId;
                     ImmoApp.banking.render();
                 }
             }
@@ -244,19 +264,26 @@ window.ImmoApp.dashboard = {
         document.getElementById("dash-missing-rent").innerText = ImmoApp.ui.formatCurrency(expectedYearly - actualRent);
 
         const statusList = document.getElementById("dash-status-list");
+        const bilanzBody = document.getElementById("dash-bilanz-body");
         statusList.innerHTML = "";
+        if (bilanzBody) bilanzBody.innerHTML = "";
         
         if(activeTenants.length === 0) {
             statusList.innerHTML = `<li class="text-gray-500 italic">Keine aktiven Mieter für dieses Jahr gefunden.</li>`;
         }
+
+        const bilanz = [];
 
         for (let tenant of activeTenants) {
             const expectedForTenant = tenant.rent * tenant.activeMonths;
             const paid = allTrans
                 .filter(tx => tx.matchedTenantId === tenant.id && tx.category === 'RENT')
                 .reduce((sum, tx) => sum + tx.amount, 0);
+            const diffTenant = paid - expectedForTenant;
             
             const pInfo = tenant.isFlatRate ? '<span class="text-[10px] bg-purple-100 text-purple-800 px-1 rounded ml-2 relative -top-0.5">Pauschalmieter</span>' : '';
+
+            bilanz.push({ tenant, expected: expectedForTenant, paid, diff: diffTenant });
 
             if (expectedForTenant > 0 && paid < (expectedForTenant - (tenant.rent * 0.5))) {
                 statusList.innerHTML += `
@@ -268,6 +295,18 @@ window.ImmoApp.dashboard = {
                         <div class="mt-1 text-gray-700">
                             Soll: ${ImmoApp.ui.formatCurrency(expectedForTenant)} | Ist: <span class="font-bold text-red-600">${ImmoApp.ui.formatCurrency(paid)}</span>
                             <span class="text-xs text-red-600 block mt-1">Es fehlen ${ImmoApp.ui.formatCurrency(expectedForTenant - paid)}. Klicke für Details.</span>
+                        </div>
+                    </li>`;
+            } else if (diffTenant > (tenant.rent * 0.1)) {
+                statusList.innerHTML += `
+                    <li class="p-3 bg-blue-50 border border-blue-200 rounded cursor-pointer hover:bg-blue-100 transition shadow-sm" onclick="ImmoApp.dashboard.showMonthlyDetails(${tenant.id})">
+                        <div class="flex justify-between items-center">
+                            <strong class="text-blue-800 hover:underline hover:text-blue-900" onclick="event.stopPropagation(); ImmoApp.dashboard.editTenantDirectly(${tenant.id});" title="Mieter direkt bearbeiten">${tenant.name} ${pInfo}</strong>
+                            <span class="text-xs bg-blue-600 text-white px-2 py-1 rounded-full">Guthaben ➔</span>
+                        </div>
+                        <div class="mt-1 text-gray-700">
+                            Soll: ${ImmoApp.ui.formatCurrency(expectedForTenant)} | Ist: <span class="font-bold text-blue-600">${ImmoApp.ui.formatCurrency(paid)}</span>
+                            <span class="text-xs text-blue-600 block mt-1">Guthaben von ${ImmoApp.ui.formatCurrency(diffTenant)} (zu viel / zu früh bezahlt).</span>
                         </div>
                     </li>`;
             } else {
@@ -284,19 +323,50 @@ window.ImmoApp.dashboard = {
                     </li>`;
             }
         }
+
+        if (bilanzBody) {
+            bilanz.sort((a, b) => b.diff - a.diff);
+            let totalExpected = 0;
+            let totalPaid = 0;
+            let totalDiff = 0;
+            bilanz.forEach(row => {
+                totalExpected += row.expected;
+                totalPaid += row.paid;
+                totalDiff += row.diff;
+                const diffClass = row.diff < -0.01 ? 'text-red-600' : (row.diff > 0.01 ? 'text-blue-600' : 'text-gray-700');
+                const diffLabel = ImmoApp.ui.formatCurrency(row.diff);
+                bilanzBody.innerHTML += `
+                    <tr class="border-t border-gray-100">
+                        <td class="px-3 py-1 whitespace-nowrap">${row.tenant.name}</td>
+                        <td class="px-3 py-1 text-right">${ImmoApp.ui.formatCurrency(row.expected)}</td>
+                        <td class="px-3 py-1 text-right">${ImmoApp.ui.formatCurrency(row.paid)}</td>
+                        <td class="px-3 py-1 text-right font-semibold ${diffClass}">${diffLabel}</td>
+                    </tr>
+                `;
+            });
+            bilanzBody.innerHTML += `
+                <tr class="border-t border-gray-300 bg-gray-50 font-bold">
+                    <td class="px-3 py-1 text-right">Summe:</td>
+                    <td class="px-3 py-1 text-right">${ImmoApp.ui.formatCurrency(totalExpected)}</td>
+                    <td class="px-3 py-1 text-right">${ImmoApp.ui.formatCurrency(totalPaid)}</td>
+                    <td class="px-3 py-1 text-right ${totalDiff < -0.01 ? 'text-red-600' : (totalDiff > 0.01 ? 'text-blue-600' : 'text-gray-700')}">${ImmoApp.ui.formatCurrency(totalDiff)}</td>
+                </tr>
+            `;
+        }
     },
 
     showMonthlyDetails: async function(tenantId) {
         const db = ImmoApp.db.instance;
         const currentYear = ImmoApp.ui.currentYear;
         const tenant = await db.tenants.get(tenantId);
-        const allTrans = await db.transactions.where('year').equals(currentYear)
-                            .filter(tx => tx.matchedTenantId === tenantId && tx.category === 'RENT').toArray();
+        // Alle Mieten dieses Mieters holen, Jahr und Monat später robust über das Datum filtern
+        const allTrans = await db.transactions.where('matchedTenantId').equals(tenantId)
+                            .filter(tx => tx.category === 'RENT').toArray();
         
         document.getElementById('monthly-tenant-name').innerText = tenant.name;
         document.getElementById('monthly-year-label').innerText = currentYear;
         
-        document.getElementById('btn-jump-banking').onclick = () => ImmoApp.dashboard.jumpToBanking(tenant.name);
+        document.getElementById('btn-jump-banking').onclick = () => ImmoApp.dashboard.jumpToBanking(tenant.id, tenant.name);
         document.getElementById('btn-jump-history').onclick = () => {
             document.getElementById('modal-monthly-details').classList.add('hidden');
             ImmoApp.ui.switchTab('tenants');
@@ -317,7 +387,18 @@ window.ImmoApp.dashboard = {
             let expected = (checkDate >= moveIn && checkDate <= moveOut) ? tenant.rent : 0;
             const monthStr = month.toString().padStart(2, '0');
             
-            const monthTxs = allTrans.filter(tx => tx.date.split('.')[1] === monthStr);
+            // Nur Zahlungen im aktuellen Jahr und entsprechenden Monat berücksichtigen
+            const monthTxs = allTrans.filter(tx => {
+                if (!tx.date) return false;
+                const parts = tx.date.split('.');
+                if (parts.length !== 3) return false;
+                const m = parts[1];
+                let y = parts[2];
+                if (y.length === 2) {
+                    y = ((parseInt(y, 10) > 50 ? 1900 : 2000) + parseInt(y, 10)).toString();
+                }
+                return m === monthStr && y === currentYear;
+            });
             const manualTxs = monthTxs.filter(tx => tx.importBatchId === 'manual');
             
             const paidThisMonth = monthTxs.reduce((sum, tx) => sum + tx.amount, 0);

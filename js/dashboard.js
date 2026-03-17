@@ -246,12 +246,42 @@ window.ImmoApp.dashboard = {
 
         let expectedYearly = 0;
         const activeTenants = [];
-        
+
+        const getRentForMonth = (tenant, year, monthIndex) => {
+            // monthIndex: 0-11
+            const checkDate = new Date(year, monthIndex, 15);
+            const moveIn = tenant.moveIn ? new Date(tenant.moveIn) : new Date(2000, 0, 1);
+            const moveOut = tenant.moveOut ? new Date(tenant.moveOut) : new Date(2099, 11, 31);
+            if (checkDate < moveIn || checkDate > moveOut) return 0;
+
+            const history = Array.isArray(tenant.rentHistory) ? tenant.rentHistory : null;
+            if (!history || history.length === 0) {
+                return tenant.rent || 0;
+            }
+            // passende Stufe aus rentHistory wählen (letzter Eintrag mit from <= checkDate)
+            let best = null;
+            history.forEach(h => {
+                if (!h.from) return;
+                const d = new Date(h.from);
+                if (d <= checkDate) {
+                    if (!best || d > new Date(best.from)) {
+                        best = h;
+                    }
+                }
+            });
+            return best ? (best.rent || 0) : (tenant.rent || 0);
+        };
+
         allTenants.forEach(t => {
             const activeMonths = ImmoApp.utils.getActiveMonthsInYear(t.moveIn, t.moveOut, currentYear);
             if (activeMonths > 0) {
-                expectedYearly += (t.rent * activeMonths);
-                activeTenants.push({ ...t, activeMonths });
+                // Jahres-Soll aus rentHistory summieren
+                let yearlyForTenant = 0;
+                for (let m = 0; m < 12; m++) {
+                    yearlyForTenant += getRentForMonth(t, parseInt(currentYear, 10), m);
+                }
+                expectedYearly += yearlyForTenant;
+                activeTenants.push({ ...t, activeMonths, _yearlyExpected: yearlyForTenant });
             }
         });
 
@@ -275,7 +305,7 @@ window.ImmoApp.dashboard = {
         const bilanz = [];
 
         for (let tenant of activeTenants) {
-            const expectedForTenant = tenant.rent * tenant.activeMonths;
+            const expectedForTenant = tenant._yearlyExpected != null ? tenant._yearlyExpected : (tenant.rent * tenant.activeMonths);
             const paid = allTrans
                 .filter(tx => tx.matchedTenantId === tenant.id && tx.category === 'RENT')
                 .reduce((sum, tx) => sum + tx.amount, 0);
@@ -378,13 +408,35 @@ window.ImmoApp.dashboard = {
         const tbody = document.getElementById('monthly-table-body');
         tbody.innerHTML = "";
         const monthNames = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+
+        const getRentForMonth = (tenant, year, monthIndex) => {
+            const checkDate = new Date(year, monthIndex, 15);
+            const moveIn = tenant.moveIn ? new Date(tenant.moveIn) : new Date(2000, 0, 1);
+            const moveOut = tenant.moveOut ? new Date(tenant.moveOut) : new Date(2099, 11, 31);
+            if (checkDate < moveIn || checkDate > moveOut) return 0;
+
+            const history = Array.isArray(tenant.rentHistory) ? tenant.rentHistory : null;
+            if (!history || history.length === 0) return tenant.rent || 0;
+
+            let best = null;
+            history.forEach(h => {
+                if (!h.from) return;
+                const d = new Date(h.from);
+                if (d <= checkDate) {
+                    if (!best || d > new Date(best.from)) {
+                        best = h;
+                    }
+                }
+            });
+            return best ? (best.rent || 0) : (tenant.rent || 0);
+        };
         
         for(let month = 1; month <= 12; month++) {
             const checkDate = new Date(currentYear, month - 1, 15);
             const moveIn = tenant.moveIn ? new Date(tenant.moveIn) : new Date(2000, 0, 1);
             const moveOut = tenant.moveOut ? new Date(tenant.moveOut) : new Date(2099, 11, 31);
             
-            let expected = (checkDate >= moveIn && checkDate <= moveOut) ? tenant.rent : 0;
+            let expected = (checkDate >= moveIn && checkDate <= moveOut) ? getRentForMonth(tenant, parseInt(currentYear, 10), month - 1) : 0;
             const monthStr = month.toString().padStart(2, '0');
             
             // Nur Zahlungen im aktuellen Jahr und entsprechenden Monat berücksichtigen

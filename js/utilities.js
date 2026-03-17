@@ -292,6 +292,20 @@ window.ImmoApp.utilities = {
             utils[i] = await this.applyRulesToUtility(utils[i]);
         }
         let allTenants = await db.tenants.toArray();
+        const allTxForYear = await db.transactions.where('year').equals(currentYear).toArray();
+
+        // Nur solche Utilities berücksichtigen, die noch eine aktive UTILITY-Buchung haben
+        // oder manuell erfasst wurden (importBatchId === 'manual')
+        utils = utils.filter(u => {
+            if (u.importBatchId === 'manual') return true;
+            const hasTx = allTxForYear.some(tx => 
+                tx.category === 'UTILITY' &&
+                tx.year === u.year &&
+                Math.abs(tx.amount) === u.amount &&
+                (tx.name + ' - ' + tx.purpose) === u.name
+            );
+            return hasTx;
+        });
 
         // Wenn ein spezielles Objekt gewählt ist, filtere!
         if(currentSelection && currentSelection !== "ALL") {

@@ -2,6 +2,8 @@ window.ImmoApp = window.ImmoApp || {};
 
 window.ImmoApp.banking = {
     tenantFilterId: null,
+    tenantFilterName: null,
+    sortByDateAsc: false,
     setupHTML: function() {
         const container = document.getElementById("banking-content");
         if (container.innerHTML.includes("Lade Module...")) {
@@ -44,7 +46,7 @@ window.ImmoApp.banking = {
                     <table class="min-w-full divide-y divide-gray-200 text-sm">
                         <thead class="bg-gray-50">
                             <tr>
-                                <th class="px-4 py-3 text-left w-24 font-bold text-gray-600">Datum</th>
+                                <th class="px-4 py-3 text-left w-24 font-bold text-gray-600 cursor-pointer" onclick="ImmoApp.banking.toggleDateSort()">Datum</th>
                                 <th class="px-4 py-3 text-left font-bold text-gray-600">Details (Sender/Empfänger & Zweck)</th>
                                 <th class="px-4 py-3 text-right font-bold text-gray-600">Betrag</th>
                                 <th class="px-4 py-3 text-left w-64 font-bold text-gray-600">Kategorie / Zuweisung</th>
@@ -61,12 +63,19 @@ window.ImmoApp.banking = {
     onSearchChange: function() {
         // Manuelle Suche hebt die Filterung auf einen bestimmten Mieter wieder auf
         this.tenantFilterId = null;
+        this.tenantFilterName = null;
         this.render();
     },
 
     onStatusChange: function() {
         // Statuswechsel soll ebenfalls alle Mieter berücksichtigen
         this.tenantFilterId = null;
+        this.tenantFilterName = null;
+        this.render();
+    },
+
+    toggleDateSort: function() {
+        this.sortByDateAsc = !this.sortByDateAsc;
         this.render();
     },
 
@@ -339,6 +348,16 @@ window.ImmoApp.banking = {
         }
     },
 
+    updateTxDate: async function(txId, newDateStr) {
+        if (!newDateStr || !/^\d{2}\.\d{2}\.\d{2,4}$/.test(newDateStr.trim())) {
+            alert("Bitte Datum im Format TT.MM.JJ oder TT.MM.JJJJ eingeben.");
+            return;
+        }
+        await ImmoApp.db.instance.transactions.update(txId, { date: newDateStr.trim() });
+        this.render();
+        if (window.ImmoApp.dashboard) ImmoApp.dashboard.render();
+    },
+
     createTenantFromTx: async function(txId) {
         const db = ImmoApp.db.instance;
         const tx = await db.transactions.get(txId);
@@ -415,13 +434,8 @@ window.ImmoApp.banking = {
         const filterText = (document.getElementById("banking-text-filter")?.value || "").toLowerCase();
         const filterStatus = document.getElementById("banking-status-filter")?.value || "ALL";
 
-        let txs = await db.transactions.where('year').equals(currentYear).reverse().toArray();
+        let txs = await db.transactions.where('year').equals(currentYear).toArray();
         const tenants = await db.tenants.toArray();
-
-        // wenn aus dem Dashboard ein bestimmter Mieter gewählt wurde, zuerst nach matchedTenantId filtern
-        if (this.tenantFilterId != null) {
-            txs = txs.filter(tx => tx.matchedTenantId === this.tenantFilterId);
-        }
 
         if (filterStatus !== "ALL") txs = txs.filter(tx => tx.category === filterStatus);
         if (filterText) {
@@ -431,6 +445,23 @@ window.ImmoApp.banking = {
                 (tx.amount.toString().includes(filterText))
             );
         }
+
+        // Sortierung nach Datum (auf- oder absteigend)
+        const parseDate = (d) => {
+            if (!d) return 0;
+            const parts = d.split('.');
+            if (parts.length !== 3) return 0;
+            let y = parts[2];
+            if (y.length === 2) {
+                y = ((parseInt(y, 10) > 50 ? 1900 : 2000) + parseInt(y, 10)).toString();
+            }
+            return new Date(`${y}-${parts[1]}-${parts[0]}`).getTime();
+        };
+        txs.sort((a, b) => {
+            const da = parseDate(a.date);
+            const dbt = parseDate(b.date);
+            return this.sortByDateAsc ? (da - dbt) : (dbt - da);
+        });
 
         const tbody = document.getElementById("banking-table-body");
         tbody.innerHTML = "";
@@ -467,9 +498,18 @@ window.ImmoApp.banking = {
                 ? `<span class="text-[10px] bg-red-100 text-red-800 px-1 py-0.5 rounded mr-1 border border-red-200 uppercase font-bold tracking-wide">Empfänger:</span>` 
                 : `<span class="text-[10px] bg-green-100 text-green-800 px-1 py-0.5 rounded mr-1 border border-green-200 uppercase font-bold tracking-wide">Sender:</span>`;
 
+            const isManual = tx.importBatchId === 'manual' || tx.importBatchId === 'manual_history';
+
             tbody.innerHTML += `
                 <tr class="hover:bg-gray-50 border-b">
-                    <td class="px-4 py-3 align-top whitespace-nowrap text-xs text-gray-500">${tx.date}</td>
+                    <td class="px-4 py-3 align-top whitespace-nowrap text-xs text-gray-500">
+                        ${
+                            isManual
+                                ? `<input type="text" value="${tx.date || ''}" class="w-20 border rounded px-1 text-xs"
+                                           onchange="ImmoApp.banking.updateTxDate(${tx.id}, this.value)" title="Datum ändern (TT.MM.JJ oder TT.MM.JJJJ)">`
+                                : (tx.date || '')
+                        }
+                    </td>
                     <td class="px-4 py-3 align-top">
                         <div class="mb-1">${nameLabel} <strong class="text-gray-800 font-bold text-sm">${tx.name || 'Unbekannt'}</strong></div>
                         <div class="text-xs text-gray-600 break-words">${tx.purpose || ''}</div>

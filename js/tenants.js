@@ -71,8 +71,9 @@ window.ImmoApp.tenants = {
                                 <div class="text-2xl font-bold text-gray-800" id="history-total-expected">0,00 €</div>
                             </div>
                             <div class="bg-blue-50 p-4 rounded border border-blue-100">
-                                <div class="text-sm text-blue-800 font-bold">Ist (Eingänge - Ausgänge)</div>
+                                <div class="text-sm text-blue-800 font-bold">Ist (Miete)</div>
                                 <div class="text-2xl font-bold text-blue-700" id="history-total-paid">0,00 €</div>
+                                <div class="text-xs text-blue-700 mt-1" id="history-deposit-info">Kaution: 0,00 € eingezahlt / 0,00 € erstattet</div>
                             </div>
                             <div class="bg-white p-4 rounded border shadow-sm" id="history-diff-box">
                                 <div class="text-sm text-gray-500 font-bold">Bilanz (Gesamte Mietdauer)</div>
@@ -188,16 +189,30 @@ window.ImmoApp.tenants = {
         
         totalExpected = monthsActive * tenant.rent;
 
-        let totalPaid = 0;
+        let totalPaidRent = 0;
+        let totalDepositIn = 0;
+        let totalDepositOut = 0;
         let tbody = '';
         
         allTrans.forEach(tx => {
-            totalPaid += tx.amount;
+            const isRent = tx.category === 'RENT';
+            const isDeposit = tx.category === 'DEPOSIT';
+            if (isRent) {
+                totalPaidRent += tx.amount;
+            }
+            if (isDeposit) {
+                if (tx.amount > 0) totalDepositIn += tx.amount;
+                else totalDepositOut += Math.abs(tx.amount);
+            }
             
             const isNegative = tx.amount < 0;
             const color = isNegative ? 'text-red-600' : 'text-green-600';
-            const icon = isNegative ? '📉 Ausgang' : '📈 Eingang';
-            const badgeClass = isNegative ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800';
+            let icon = isNegative ? '📉 Ausgang' : '📈 Eingang';
+            let badgeClass = isNegative ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800';
+            if (isDeposit) {
+                icon = '🔒 Kaution';
+                badgeClass = 'bg-yellow-100 text-yellow-800';
+            }
             
             tbody += `
                 <tr class="hover:bg-gray-50 border-b">
@@ -219,12 +234,17 @@ window.ImmoApp.tenants = {
             tbody = `<tr><td colspan="5" class="px-4 py-8 text-center text-gray-500 italic">Es wurden noch keine Zahlungen für diesen Mieter erfasst.</td></tr>`;
         }
 
-        const diff = totalPaid - totalExpected;
+        const diff = totalPaidRent - totalExpected;
         
         document.getElementById('history-tenant-name').innerText = tenant.name;
         document.getElementById('history-months-info').innerText = `Info: Dieser Mieter hat seit Einzug ${monthsActive} Monatsmieten angesammelt.`;
         document.getElementById('history-total-expected').innerText = ImmoApp.ui.formatCurrency(totalExpected);
-        document.getElementById('history-total-paid').innerText = ImmoApp.ui.formatCurrency(totalPaid);
+        document.getElementById('history-total-paid').innerText = ImmoApp.ui.formatCurrency(totalPaidRent);
+
+        const depositInfoEl = document.getElementById('history-deposit-info');
+        if (depositInfoEl) {
+            depositInfoEl.innerText = `Kaution: ${ImmoApp.ui.formatCurrency(totalDepositIn)} eingezahlt / ${ImmoApp.ui.formatCurrency(totalDepositOut)} erstattet`;
+        }
         
         const diffEl = document.getElementById('history-total-diff');
         const diffBox = document.getElementById('history-diff-box');
@@ -315,6 +335,10 @@ window.ImmoApp.tenants = {
                             <label class="block text-sm font-medium">Zimmer (optional)</label>
                             <input type="text" id="modal-tenant-room" class="w-full border p-2 rounded" placeholder="z.B. Zimmer 1">
                         </div>
+                        <div>
+                            <label class="block text-sm font-medium">Wohnfläche (m², optional)</label>
+                            <input type="number" id="modal-tenant-sqm" class="w-full border p-2 rounded" step="0.01" placeholder="z.B. 15" title="Für Zähler-Verteilung Variante B">
+                        </div>
                     </div>
                     <div>
                         <label class="block text-sm font-medium">Name des Mieters *</label>
@@ -374,6 +398,7 @@ window.ImmoApp.tenants = {
             document.getElementById('modal-tenant-id').value = t.id;
             document.getElementById('modal-tenant-property').value = t.propertyId || '';
             document.getElementById('modal-tenant-room').value = t.room || '';
+            document.getElementById('modal-tenant-sqm').value = (t.sqm != null && t.sqm !== '') ? t.sqm : '';
             document.getElementById('modal-tenant-name').value = t.name;
             document.getElementById('modal-tenant-baserent').value = t.baseRent !== undefined ? t.baseRent : t.rent;
             document.getElementById('modal-tenant-prepayment').value = t.prepayment || 0;
@@ -387,6 +412,7 @@ window.ImmoApp.tenants = {
             document.getElementById('modal-tenant-id').value = '';
             document.getElementById('modal-tenant-property').value = '';
             document.getElementById('modal-tenant-room').value = '';
+            document.getElementById('modal-tenant-sqm').value = '';
             document.getElementById('modal-tenant-name').value = defaultName;
             document.getElementById('modal-tenant-baserent').value = defaultRent || '';
             document.getElementById('modal-tenant-prepayment').value = 0;
@@ -414,6 +440,8 @@ window.ImmoApp.tenants = {
         const id = document.getElementById('modal-tenant-id').value;
         const propertyId = document.getElementById('modal-tenant-property').value;
         const room = document.getElementById('modal-tenant-room').value;
+        const sqmRaw = document.getElementById('modal-tenant-sqm').value;
+        const sqm = (sqmRaw !== '' && !isNaN(parseFloat(sqmRaw))) ? parseFloat(sqmRaw) : null;
         const name = document.getElementById('modal-tenant-name').value;
         
         const baseRent = parseFloat(document.getElementById('modal-tenant-baserent').value || 0);
@@ -435,6 +463,7 @@ window.ImmoApp.tenants = {
         const data = { 
             propertyId: parseInt(propertyId), 
             room,
+            sqm,
             name, 
             rent: totalRent, 
             baseRent,

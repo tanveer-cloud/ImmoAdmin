@@ -31,6 +31,7 @@
     <button onclick="ImmoApp.ui.switchTab('tenants')" id="nav-tenants" class="nav-btn pb-1 px-2 text-sm">Mieter & Objekte</button>
     <button onclick="ImmoApp.ui.switchTab('banking')" id="nav-banking" class="nav-btn pb-1 px-2 text-sm">Kontoauszug</button>
     <button onclick="ImmoApp.ui.switchTab('utilities')" id="nav-utilities" class="nav-btn pb-1 px-2 text-sm text-gray-600">📊 Nebenkosten</button>
+    <button onclick="ImmoApp.ui.switchTab('meters')" id="nav-meters" class="nav-btn pb-1 px-2 text-sm text-gray-600">🔢 Zähler</button>
     <button onclick="ImmoApp.ui.switchTab('maintenance')" id="nav-maintenance" class="nav-btn pb-1 px-2 text-sm">Wartung</button>
     <button onclick="ImmoApp.ui.switchTab('settings')" id="nav-settings" class="nav-btn pb-1 px-2 text-sm text-gray-500">⚙️ Backup</button>
 </nav>
@@ -68,7 +69,12 @@
                 <p class="text-gray-500">Lade Module...</p>
             </div>
         </div>
-       
+        <div id="view-meters" class="view-section">
+            <h2 class="text-2xl font-bold mb-6">Zähler, Tarife & WG-Verbrauch <span class="year-label"></span></h2>
+            <div id="meters-content">
+                <p class="text-gray-500">Lade Module...</p>
+            </div>
+        </div>
 		<div id="view-maintenance" class="view-section">
             <h2 class="text-2xl font-bold mb-6">Wartung & Notizen</h2>
             <div id="maintenance-content">
@@ -147,27 +153,14 @@
     <script src="js/tenants.js"></script>
     <script src="js/banking.js"></script>
 	<script src="js/utilities.js"></script>
+    <script src="js/meters.js"></script>
     <script src="js/maintenance.js"></script>
     <script src="js/settings.js"></script>
 <script src="js/search.js"></script>
  <script>
         window.onload = async () => {
-            const db = new Dexie("ImmoAdminDB");
-            
-            // WICHTIG: Version auf 10 erhöht, um das Anlegen der Tabelle zu erzwingen!
-            db.version(10).stores({
-                properties: '++id, name',
-                tenants: '++id, propertyId, name, rent, iban, moveIn, moveOut',
-                transactions: '++id, date, amount, purpose, iban, name, matchedTenantId, category, year, importBatchId',
-                utilities: '++id, name, amount, year, importBatchId, propertyId',
-                maintenance: '++id, task, status, date, recordType' 
-            });
-            window.ImmoApp.db.instance = db;
-            await window.ImmoApp.db.init(); 
-
+            await window.ImmoApp.db.init();
             ImmoApp.ui.init();
-            
-            // Lade die Inhalte der Module
             if(window.ImmoApp.dashboard) ImmoApp.dashboard.render();
             if(window.ImmoApp.tenants) ImmoApp.tenants.render();
             if(window.ImmoApp.banking) ImmoApp.banking.render();
@@ -175,6 +168,7 @@
             if(window.ImmoApp.settings) ImmoApp.settings.render();
             if(window.ImmoApp.search) ImmoApp.search.render();
             if(window.ImmoApp.utilities) ImmoApp.utilities.render();
+            if(window.ImmoApp.meters) ImmoApp.meters.render();
             console.log("ImmoAdmin: Alle Module geladen. System bereit!");
         };
     </script>

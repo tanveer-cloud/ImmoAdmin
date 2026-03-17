@@ -307,12 +307,30 @@ window.ImmoApp.utilities = {
         let costsHtml = "";
 
         // 1. Einnahmen durch Pauschalen berechnen & aufschlüsseln
+        const getPrepaymentForMonth = (tenant, year, monthIndex) => {
+            const checkDate = new Date(year, monthIndex, 15);
+            const moveIn = tenant.moveIn ? new Date(tenant.moveIn) : new Date(2000, 0, 1);
+            const moveOut = tenant.moveOut ? new Date(tenant.moveOut) : new Date(2099, 11, 31);
+            if (checkDate < moveIn || checkDate > moveOut) return 0;
+            const history = Array.isArray(tenant.rentHistory) ? tenant.rentHistory : null;
+            if (!history || history.length === 0) return tenant.prepayment || 0;
+            let best = null;
+            history.forEach(h => {
+                if (!h.from) return;
+                const d = new Date(h.from);
+                if (d <= checkDate) {
+                    if (!best || d > new Date(best.from)) best = h;
+                }
+            });
+            return best ? (best.prepayment || 0) : (tenant.prepayment || 0);
+        };
+
         allTenants.forEach(t => {
-            const activeM = ImmoApp.utils.getActiveMonthsInYear(t.moveIn, t.moveOut, currentYear);
-            const prepayment = t.prepayment || 0;
-            
-            if(activeM > 0 && prepayment > 0) {
-                const tenantSum = prepayment * activeM;
+            let tenantSum = 0;
+            for (let m = 0; m < 12; m++) {
+                tenantSum += getPrepaymentForMonth(t, parseInt(currentYear, 10), m);
+            }
+            if (tenantSum > 0) {
                 totalIncome += tenantSum;
                 incomeHtml += `
                     <li class="flex flex-col border-b border-gray-100 pb-2">
@@ -320,7 +338,7 @@ window.ImmoApp.utilities = {
                             <span class="font-bold text-gray-800">${t.name}</span>
                             <span class="font-bold text-blue-600">${ImmoApp.ui.formatCurrency(tenantSum)}</span>
                         </div>
-                        <span class="text-xs text-gray-500">${activeM} Monate &agrave; ${ImmoApp.ui.formatCurrency(prepayment)} (NK-Anteil)</span>
+                        <span class="text-xs text-gray-500">Vorauszahlungen nach aktuellem Stand (inkl. Anpassungen)</span>
                     </li>
                 `;
             }

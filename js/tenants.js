@@ -460,6 +460,36 @@ window.ImmoApp.tenants = {
             return alert("Bitte fülle Name, Einzugsdatum UND das zugeordnete Objekt aus!");
         }
 
+        // Miet-Historie: einfache Staffel, aktuell nur technisch gespeichert,
+        // die Berechnung wird in einem späteren Schritt umgestellt.
+        let rentHistory = [];
+        if (id) {
+            const existing = await db.tenants.get(parseInt(id));
+            if (existing && Array.isArray(existing.rentHistory)) {
+                rentHistory = existing.rentHistory;
+            }
+            // Wenn sich die Miete geändert hat, füge einen neuen Eintrag an
+            const prevRent = existing ? (existing.rent || 0) : 0;
+            const prevPrepay = existing ? (existing.prepayment || 0) : 0;
+            if (prevRent !== totalRent || prevPrepay !== prepayment) {
+                rentHistory = rentHistory || [];
+                rentHistory.push({
+                    from: new Date().toISOString().split('T')[0],
+                    rent: totalRent,
+                    baseRent: baseRent,
+                    prepayment: prepayment
+                });
+            }
+        } else {
+            // Neuer Mieter: initiale Miete als erster Eintrag hinterlegen
+            rentHistory.push({
+                from: moveIn,
+                rent: totalRent,
+                baseRent: baseRent,
+                prepayment: prepayment
+            });
+        }
+
         const data = { 
             propertyId: parseInt(propertyId), 
             room,
@@ -473,7 +503,8 @@ window.ImmoApp.tenants = {
             depositReturned,
             iban, 
             moveIn, 
-            moveOut 
+            moveOut,
+            rentHistory
         };
 
         if (id) await db.tenants.update(parseInt(id), data);

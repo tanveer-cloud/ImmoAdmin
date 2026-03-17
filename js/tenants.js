@@ -344,7 +344,7 @@ window.ImmoApp.tenants = {
                         <label class="block text-sm font-medium">Name des Mieters *</label>
                         <input type="text" id="modal-tenant-name" class="w-full border p-2 rounded" placeholder="z.B. Max Mustermann">
                     </div>
-                    <div class="grid grid-cols-2 gap-4">
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
                         <div>
                             <label class="block text-sm font-medium text-blue-700">Kaltmiete (€) *</label>
                             <input type="number" id="modal-tenant-baserent" class="w-full border p-2 rounded bg-blue-50" step="0.01">
@@ -352,6 +352,10 @@ window.ImmoApp.tenants = {
                         <div>
                             <label class="block text-sm font-medium text-orange-700">Nebenkosten (€) *</label>
                             <input type="number" id="modal-tenant-prepayment" class="w-full border p-2 rounded bg-orange-50" step="0.01">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium">Mietanpassung gültig ab</label>
+                            <input type="date" id="modal-tenant-rentfrom" class="w-full border p-2 rounded" title="Optional: Datum ab dem diese Miete gelten soll">
                         </div>
                     </div>
                     <div class="flex items-center gap-2 bg-gray-100 p-2 rounded border">
@@ -447,6 +451,7 @@ window.ImmoApp.tenants = {
         const baseRent = parseFloat(document.getElementById('modal-tenant-baserent').value || 0);
         const prepayment = parseFloat(document.getElementById('modal-tenant-prepayment').value || 0);
         const totalRent = baseRent + prepayment;
+        const rentFromInput = document.getElementById('modal-tenant-rentfrom').value;
         
         const isFlatRate = document.getElementById('modal-tenant-isflatrate').checked;
         const deposit = parseFloat(document.getElementById('modal-tenant-deposit').value || 0);
@@ -473,8 +478,9 @@ window.ImmoApp.tenants = {
             const prevPrepay = existing ? (existing.prepayment || 0) : 0;
             if (prevRent !== totalRent || prevPrepay !== prepayment) {
                 rentHistory = rentHistory || [];
+                const fromDate = rentFromInput || new Date().toISOString().split('T')[0];
                 rentHistory.push({
-                    from: new Date().toISOString().split('T')[0],
+                    from: fromDate,
                     rent: totalRent,
                     baseRent: baseRent,
                     prepayment: prepayment

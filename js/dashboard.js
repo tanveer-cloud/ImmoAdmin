@@ -108,7 +108,7 @@ window.ImmoApp.dashboard = {
         }
     },
 
-    jumpToBanking: function(tenantId, tenantName) {
+    jumpToBanking: function(tenantName) {
         document.getElementById('modal-monthly-details').classList.add('hidden');
         ImmoApp.ui.switchTab('banking');
         setTimeout(() => {
@@ -116,10 +116,11 @@ window.ImmoApp.dashboard = {
                 const filterInput = document.getElementById('banking-text-filter');
                 const statusFilter = document.getElementById('banking-status-filter');
                 if(filterInput && statusFilter) {
-                    // Textsuche leeren, stattdessen auf Tenant-ID filtern
-                    filterInput.value = "";
+                    // Auf Namen filtern (Textsuche), keinen harten Tenant-Filter setzen
+                    filterInput.value = tenantName;
                     statusFilter.value = "ALL";
-                    ImmoApp.banking.tenantFilterId = tenantId;
+                    ImmoApp.banking.tenantFilterId = null;
+                    ImmoApp.banking.tenantFilterName = null;
                     ImmoApp.banking.render();
                 }
             }
@@ -396,7 +397,7 @@ window.ImmoApp.dashboard = {
         document.getElementById('monthly-tenant-name').innerText = tenant.name;
         document.getElementById('monthly-year-label').innerText = currentYear;
         
-        document.getElementById('btn-jump-banking').onclick = () => ImmoApp.dashboard.jumpToBanking(tenant.id, tenant.name);
+        document.getElementById('btn-jump-banking').onclick = () => ImmoApp.dashboard.jumpToBanking(tenant.name);
         document.getElementById('btn-jump-history').onclick = () => {
             document.getElementById('modal-monthly-details').classList.add('hidden');
             ImmoApp.ui.switchTab('tenants');

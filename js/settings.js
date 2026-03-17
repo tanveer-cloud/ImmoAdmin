@@ -87,6 +87,16 @@ window.ImmoApp.settings = {
                         <button onclick="ImmoApp.settings.runExport()" class="bg-blue-600 text-white px-4 py-3 rounded-lg shadow font-bold w-full hover:bg-blue-700 transition flex justify-center items-center gap-2">
                             <span>💾</span> Ausgewählte Daten herunterladen (.json)
                         </button>
+                        <div class="mt-4 space-y-2 border-t pt-4">
+                            <h4 class="text-sm font-bold text-blue-800 mb-1">🌥️ Google Drive Sync (Beta)</h4>
+                            <button onclick="ImmoApp.settings.syncToDrive()" class="w-full bg-indigo-600 text-white px-3 py-2 rounded-lg text-sm font-bold hover:bg-indigo-700 flex items-center justify-center gap-2">
+                                <span>⬆️</span><span>Mit Drive synchronisieren</span>
+                            </button>
+                            <button onclick="ImmoApp.settings.syncFromDrive()" class="w-full bg-indigo-50 text-indigo-800 px-3 py-2 rounded-lg text-sm font-bold hover:bg-indigo-100 flex items-center justify-center gap-2">
+                                <span>⬇️</span><span>Von Drive laden</span>
+                            </button>
+                            <p class="text-[11px] text-gray-400">Hinweis: Nutzt deine oben hinterlegte Client ID / API Key und speichert eine Datei <code>ImmoAdmin_DB.json</code> in deinem Drive.</p>
+                        </div>
                     </div>
 
                     <div class="bg-white p-6 rounded-lg shadow-sm border border-green-100 flex flex-col justify-between">
@@ -168,7 +178,7 @@ window.ImmoApp.settings = {
         }
     },
 
-    runExport: async function() {
+    buildExportObject: async function() {
         const db = ImmoApp.db.instance;
         const data = {};
         
@@ -190,8 +200,6 @@ window.ImmoApp.settings = {
                     const name = (tx.name || '').trim().toLowerCase();
                     if(name && !seen.has(name)) {
                         seen.add(name);
-                        // Wir speichern die KI-Erinnerung im Jahr 2000 mit 0€. 
-                        // So taucht sie in keiner Statistik auf, aber das Auto-Match lernt daraus!
                         kiData.push({
                             date: '01.01.2000', year: '2000', amount: 0,
                             name: tx.name, purpose: '🤖 KI-Gedächtnis (Auto-Zuordnung)',
@@ -202,9 +210,12 @@ window.ImmoApp.settings = {
                 }
             });
             data.transactions = kiData;
-            alert(`Tipp: Es wurden ${kiData.length} KI-Regeln (Handwerker/Stadtwerke etc.) in das Backup extrahiert!`);
         }
+        return data;
+    },
 
+    runExport: async function() {
+        const data = await this.buildExportObject();
         const jsonString = JSON.stringify(data, null, 2);
         const blob = new Blob([jsonString], {type: "application/json"});
         const url = URL.createObjectURL(blob);
@@ -219,6 +230,34 @@ window.ImmoApp.settings = {
         URL.revokeObjectURL(url);
     },
 
+    importFromObject: async function(data) {
+        const db = ImmoApp.db.instance;
+        let msg = "Folgende Daten wurden erfolgreich importiert:\n\n";
+                
+        if (data.properties && data.properties.length > 0) {
+            await db.properties.bulkPut(data.properties);
+            msg += `✅ ${data.properties.length} Objekte/WGs\n`;
+        }
+        if (data.tenants && data.tenants.length > 0) {
+            await db.tenants.bulkPut(data.tenants);
+            msg += `✅ ${data.tenants.length} Mieter\n`;
+        }
+        if (data.transactions && data.transactions.length > 0) {
+            await db.transactions.bulkPut(data.transactions);
+            msg += `✅ ${data.transactions.length} Buchungen / KI-Regeln\n`;
+        }
+        if (data.utilities && data.utilities.length > 0) {
+            await db.utilities.bulkPut(data.utilities);
+            msg += `✅ ${data.utilities.length} Nebenkosten-Einträge\n`;
+        }
+        if (data.maintenance && data.maintenance.length > 0) {
+            await db.maintenance.bulkPut(data.maintenance);
+            msg += `✅ ${data.maintenance.length} Notizen & Zählerstände\n`;
+        }
+        alert(msg + "\nDie App wird nun neu geladen, um die Änderungen anzuzeigen.");
+        location.reload();
+    },
+
     runImport: function() {
         const fileInput = document.getElementById('import-file');
         if (!fileInput.files.length) return alert("Bitte wähle zuerst eine Backup-Datei (.json) aus.");
@@ -227,38 +266,162 @@ window.ImmoApp.settings = {
         reader.onload = async function(e) {
             try {
                 const data = JSON.parse(e.target.result);
-                const db = ImmoApp.db.instance;
-                let msg = "Folgende Daten wurden erfolgreich importiert:\n\n";
-                
-                if (data.properties && data.properties.length > 0) {
-                    await db.properties.bulkPut(data.properties);
-                    msg += `✅ ${data.properties.length} Objekte/WGs\n`;
-                }
-                if (data.tenants && data.tenants.length > 0) {
-                    await db.tenants.bulkPut(data.tenants);
-                    msg += `✅ ${data.tenants.length} Mieter\n`;
-                }
-                if (data.transactions && data.transactions.length > 0) {
-                    await db.transactions.bulkPut(data.transactions);
-                    msg += `✅ ${data.transactions.length} Buchungen / KI-Regeln\n`;
-                }
-                if (data.utilities && data.utilities.length > 0) {
-                    await db.utilities.bulkPut(data.utilities);
-                    msg += `✅ ${data.utilities.length} Nebenkosten-Einträge\n`;
-                }
-                if (data.maintenance && data.maintenance.length > 0) {
-                    await db.maintenance.bulkPut(data.maintenance);
-                    msg += `✅ ${data.maintenance.length} Notizen & Zählerstände\n`;
-                }
-                
-                alert(msg + "\nDie App wird nun neu geladen, um die Änderungen anzuzeigen.");
-                location.reload();
+                await ImmoApp.settings.importFromObject(data);
             } catch(err) {
                 alert("Fehler beim Importieren! Ist das wirklich eine gültige ImmoApp .json Datei?");
                 console.error(err);
             }
         };
         reader.readAsText(fileInput.files[0]);
+    },
+
+    // --- Google Drive Sync (Basis, ohne Verschlüsselung) ---
+    _driveState: {
+        lastSyncAt: null,
+        tokenClient: null,
+        gapiInited: false,
+        gisInited: false
+    },
+
+    ensureDriveConfig: async function() {
+        const db = ImmoApp.db.instance;
+        const clientId = await db.settings.get("googleClientId");
+        const apiKey = await db.settings.get("googleApiKey");
+        if (!clientId || !clientId.value || !apiKey || !apiKey.value) {
+            alert("Bitte zuerst im Bereich 'Google API & Drive' eine OAuth Client ID und einen API Key speichern.");
+            return null;
+        }
+        return { clientId: clientId.value, apiKey: apiKey.value };
+    },
+
+    initGapiClient: async function() {
+        return new Promise((resolve, reject) => {
+            if (this._driveState.gapiInited && this._driveState.gisInited) {
+                resolve();
+                return;
+            }
+            if (typeof gapi === "undefined" || !google || !google.accounts || !google.accounts.oauth2) {
+                alert("Google API-Skripte wurden noch nicht geladen. Bitte stelle sicher, dass die Seite über HTTPS (z.B. GitHub Pages) geladen wird und lade die Seite neu.");
+                reject("gapi_not_loaded");
+                return;
+            }
+            const scope = "https://www.googleapis.com/auth/drive.file";
+            const discoveryDocs = ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"];
+
+            this.ensureDriveConfig().then(cfg => {
+                if (!cfg) {
+                    reject("no_config");
+                    return;
+                }
+                gapi.load("client", async () => {
+                    try {
+                        await gapi.client.init({
+                            apiKey: cfg.apiKey,
+                            discoveryDocs
+                        });
+                        this._driveState.gapiInited = true;
+                        this._driveState.tokenClient = google.accounts.oauth2.initTokenClient({
+                            client_id: cfg.clientId,
+                            scope,
+                            callback: (tokenResponse) => {
+                                if (tokenResponse && tokenResponse.access_token) {
+                                    gapi.client.setToken(tokenResponse);
+                                    this._driveState.gisInited = true;
+                                    resolve();
+                                } else {
+                                    reject("no_token");
+                                }
+                            }
+                        });
+                        this._driveState.tokenClient.requestAccessToken();
+                    } catch (e) {
+                        console.error("Fehler beim Initialisieren des Drive-Clients", e);
+                        alert("Fehler beim Initialisieren der Google Drive Verbindung. Details in der Konsole.");
+                        reject(e);
+                    }
+                });
+            });
+        });
+    },
+
+    syncToDrive: async function() {
+        try {
+            await this.initGapiClient();
+        } catch {
+            return;
+        }
+        const data = await this.buildExportObject();
+        const jsonString = JSON.stringify(data, null, 2);
+
+        const boundary = "foo_bar_baz_" + Date.now();
+        const delimiter = "\r\n--" + boundary + "\r\n";
+        const closeDelimiter = "\r\n--" + boundary + "--";
+        const metadata = {
+            name: "ImmoAdmin_DB.json",
+            mimeType: "application/json"
+        };
+
+        const multipartRequestBody =
+            delimiter +
+            "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+            JSON.stringify(metadata) +
+            delimiter +
+            "Content-Type: application/json\r\n\r\n" +
+            jsonString +
+            closeDelimiter;
+
+        try {
+            const response = await gapi.client.request({
+                path: "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+                method: "POST",
+                body: multipartRequestBody,
+                headers: {
+                    "Content-Type": "multipart/related; boundary=" + boundary
+                }
+            });
+            console.log("Drive Upload Ergebnis:", response);
+            this._driveState.lastSyncAt = new Date();
+            alert("Backup wurde erfolgreich nach Google Drive hochgeladen.");
+        } catch (e) {
+            console.error("Fehler beim Hochladen zu Drive", e);
+            alert("Fehler beim Hochladen zu Google Drive. Details in der Konsole.");
+        }
+    },
+
+    syncFromDrive: async function() {
+        try {
+            await this.initGapiClient();
+        } catch {
+            return;
+        }
+        try {
+            const listResp = await gapi.client.drive.files.list({
+                q: "name = 'ImmoAdmin_DB.json' and trashed = false",
+                pageSize: 1,
+                fields: "files(id, name, modifiedTime)"
+            });
+            if (!listResp.result.files || listResp.result.files.length === 0) {
+                alert("Es wurde keine Datei 'ImmoAdmin_DB.json' in deinem Drive gefunden.");
+                return;
+            }
+            const file = listResp.result.files[0];
+            const getResp = await gapi.client.drive.files.get({
+                fileId: file.id,
+                alt: "media"
+            });
+            const data = getResp.result;
+            if (!data || typeof data !== "object") {
+                alert("Die geladene Datei konnte nicht als ImmoAdmin-Backup erkannt werden.");
+                return;
+            }
+            if (!confirm("Backup von Google Drive laden und in die lokale Datenbank importieren? Bereits vorhandene Einträge mit gleicher ID werden überschrieben.")) {
+                return;
+            }
+            await this.importFromObject(data);
+        } catch (e) {
+            console.error("Fehler beim Laden von Drive", e);
+            alert("Fehler beim Laden der Backup-Datei von Google Drive. Details in der Konsole.");
+        }
     },
 
     clearTable: async function(tableName, displayName) {

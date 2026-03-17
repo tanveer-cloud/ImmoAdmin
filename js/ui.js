@@ -27,6 +27,18 @@ window.ImmoApp.ui = {
         
         // Startbildschirm laden
         this.switchTab('dashboard');
+
+        // Mobile-Navigation
+        const toggle = document.getElementById('mobile-nav-toggle');
+        const menu = document.getElementById('mobile-nav-menu');
+        if (toggle && menu) {
+            toggle.addEventListener('click', () => {
+                menu.classList.toggle('hidden');
+            });
+            this.closeMobileNav = () => {
+                if (!menu.classList.contains('hidden')) menu.classList.add('hidden');
+            };
+        }
     },
 
     updateYearLabels: function() {

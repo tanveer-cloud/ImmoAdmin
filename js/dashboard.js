@@ -185,6 +185,9 @@ window.ImmoApp.dashboard = {
         const allTenants = await db.tenants.toArray();
         const allTrans = await db.transactions.where('year').equals(currentYear).toArray();
         const allProps = await db.properties.toArray();
+        const now = new Date();
+        const realCurrentYear = now.getFullYear();
+        const monthLimit = (parseInt(currentYear, 10) === realCurrentYear) ? now.getMonth() : 11; // 0..11 inclusive
 
         const depositList = document.getElementById("dash-deposit-alerts");
         const vacancyList = document.getElementById("dash-vacancy-alerts");
@@ -274,21 +277,41 @@ window.ImmoApp.dashboard = {
         };
 
         allTenants.forEach(t => {
-            const activeMonths = ImmoApp.utils.getActiveMonthsInYear(t.moveIn, t.moveOut, currentYear);
-            if (activeMonths > 0) {
-                // Jahres-Soll aus rentHistory summieren
-                let yearlyForTenant = 0;
-                for (let m = 0; m < 12; m++) {
-                    yearlyForTenant += getRentForMonth(t, parseInt(currentYear, 10), m);
-                }
-                expectedYearly += yearlyForTenant;
-                activeTenants.push({ ...t, activeMonths, _yearlyExpected: yearlyForTenant });
+            // Bei laufendem Jahr: nur bis zum aktuellen Monat bewerten.
+            let expectedForTenant = 0;
+            let activeMonthsUpTo = 0;
+            for (let m = 0; m <= monthLimit; m++) {
+                const rent = getRentForMonth(t, parseInt(currentYear, 10), m);
+                expectedForTenant += rent;
+                if (rent > 0) activeMonthsUpTo++;
+            }
+            if (activeMonthsUpTo > 0) {
+                expectedYearly += expectedForTenant;
+                activeTenants.push({ ...t, activeMonths: activeMonthsUpTo, _yearlyExpected: expectedForTenant });
             }
         });
 
+        const parseTxMonthIndex = (tx) => {
+            if (!tx?.date) return null;
+            const parts = String(tx.date).split('.');
+            if (parts.length !== 3) return null;
+            const m = parts[1];
+            if (!m) return null;
+            const mNum = parseInt(m, 10);
+            if (!Number.isFinite(mNum)) return null;
+            const monthIndex = mNum - 1; // 0..11
+            if (monthIndex < 0 || monthIndex > 11) return null;
+            return monthIndex;
+        };
+
         const actualRent = allTrans
             .filter(tx => tx.category === 'RENT')
-            .reduce((sum, tx) => sum + tx.amount, 0);
+            .reduce((sum, tx) => {
+                const monthIndex = parseTxMonthIndex(tx);
+                if (monthIndex == null) return sum;
+                if (monthIndex > monthLimit) return sum; // nur bis aktuellem Monat
+                return sum + tx.amount;
+            }, 0);
 
         document.getElementById("dash-expected-rent").innerText = ImmoApp.ui.formatCurrency(expectedYearly);
         document.getElementById("dash-actual-rent").innerText = ImmoApp.ui.formatCurrency(actualRent);
@@ -309,7 +332,12 @@ window.ImmoApp.dashboard = {
             const expectedForTenant = tenant._yearlyExpected != null ? tenant._yearlyExpected : (tenant.rent * tenant.activeMonths);
             const paid = allTrans
                 .filter(tx => tx.matchedTenantId === tenant.id && tx.category === 'RENT')
-                .reduce((sum, tx) => sum + tx.amount, 0);
+                .reduce((sum, tx) => {
+                    const monthIndex = parseTxMonthIndex(tx);
+                    if (monthIndex == null) return sum;
+                    if (monthIndex > monthLimit) return sum; // nur bis aktuellem Monat
+                    return sum + tx.amount;
+                }, 0);
             const diffTenant = paid - expectedForTenant;
             
             const pInfo = tenant.isFlatRate ? '<span class="text-[10px] bg-purple-100 text-purple-800 px-1 rounded ml-2 relative -top-0.5">Pauschalmieter</span>' : '';

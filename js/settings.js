@@ -115,6 +115,59 @@ window.ImmoApp.settings = {
 
                 </div>
 
+                <div class="mt-8 bg-gray-50 p-6 rounded-lg shadow-sm border border-gray-200">
+                    <h3 class="text-lg font-bold text-gray-800 mb-2">📋 Absender für Anschreiben & NK-Abrechnung</h3>
+                    <p class="text-sm text-gray-600 mb-4">Diese Daten erscheinen im Briefkopf und bei Zahlungshinweisen (z.B. IBAN).</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Name / Firma</label>
+                            <input type="text" id="sender-name" class="w-full border rounded p-2 text-sm" placeholder="z.B. Max Mustermann oder Hausverwaltung XY">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Straße & Hausnummer</label>
+                            <input type="text" id="sender-street" class="w-full border rounded p-2 text-sm" placeholder="z.B. Musterstraße 1">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">PLZ</label>
+                            <input type="text" id="sender-zip" class="w-full border rounded p-2 text-sm" placeholder="12345">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Ort</label>
+                            <input type="text" id="sender-city" class="w-full border rounded p-2 text-sm" placeholder="Berlin">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Land (optional)</label>
+                            <input type="text" id="sender-country" class="w-full border rounded p-2 text-sm" placeholder="Deutschland">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">IBAN (für Zahlungshinweise)</label>
+                            <input type="text" id="sender-iban" class="w-full border rounded p-2 text-sm font-mono" placeholder="DE89...">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 border-t pt-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Ort (für Datumzeile, optional)</label>
+                            <input type="text" id="sender-place" class="w-full border rounded p-2 text-sm" placeholder="z.B. Berlin">
+                            <p class="text-[11px] text-gray-500 mt-1">Wird als „Ort, Datum“ im Dokument verwendet (wenn leer, nimmt die App den Absender‑Ort).</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Firmenlogo (optional)</label>
+                            <input type="file" id="sender-logo" accept="image/*" class="block w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-gray-200 file:text-gray-800 hover:file:bg-gray-300 cursor-pointer border rounded-lg p-2 bg-white">
+                            <div class="mt-2 flex items-center gap-3">
+                                <img id="sender-logo-preview" alt="Logo Vorschau" style="display:none; max-height:48px; max-width:180px; object-fit:contain; border:1px solid #e5e7eb; border-radius:6px; padding:4px; background:#fff;" />
+                                <button type="button" onclick="ImmoApp.settings.clearSenderLogo()" class="text-xs font-bold text-red-600 hover:underline">Logo entfernen</button>
+                            </div>
+                            <p class="text-[11px] text-gray-500 mt-1">Hinweis: Das Logo wird lokal im Browser gespeichert.</p>
+                        </div>
+                        <div class="md:col-span-2">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Fußzeile (optional)</label>
+                            <textarea id="sender-footer" rows="4" class="w-full border rounded p-2 text-sm" placeholder="z.B.\nHausverwaltung XY · Musterstraße 1 · 12345 Berlin\nIBAN: DE... · BIC: ...\nHandelsregister: ... · USt‑IdNr.: ..."></textarea>
+                            <p class="text-[11px] text-gray-500 mt-1">Erscheint am Ende der Dokumente (Anschreiben + NK‑Abrechnung).</p>
+                        </div>
+                    </div>
+                    <button onclick="ImmoApp.settings.saveSenderConfig()" class="bg-gray-700 text-white px-4 py-2 rounded font-bold hover:bg-gray-800">Absender speichern</button>
+                </div>
+
                 <div class="mt-8 bg-red-50 p-6 rounded-lg shadow-sm border border-red-200">
                     <h3 class="text-lg font-bold text-red-800 mb-2">🚨 Gefahrenzone: Daten gezielt löschen (Reset)</h3>
                     <p class="text-sm text-red-600 mb-4 border-b border-red-200 pb-4">Achtung: Diese Aktionen können nicht rückgängig gemacht werden. Bitte mache vorher ein Backup!</p>
@@ -178,10 +231,113 @@ window.ImmoApp.settings = {
         }
     },
 
+    loadSenderConfig: async function() {
+        if (!ImmoApp.db || !ImmoApp.db.instance) return;
+        const db = ImmoApp.db.instance;
+        try {
+            const get = (k) => db.settings.get(k).then(r => r && r.value ? r.value : "");
+            const name = await get("senderName");
+            const street = await get("senderStreet");
+            const zip = await get("senderZip");
+            const city = await get("senderCity");
+            const country = await get("senderCountry");
+            const iban = await get("senderIban");
+            const place = await get("senderPlace");
+            const footer = await get("senderFooter");
+            const logo = await get("senderLogoDataUrl");
+            const el = (id, v) => { const e = document.getElementById(id); if (e && v) e.value = v; };
+            el("sender-name", name);
+            el("sender-street", street);
+            el("sender-zip", zip);
+            el("sender-city", city);
+            el("sender-country", country);
+            el("sender-iban", iban);
+            el("sender-place", place);
+            const footerEl = document.getElementById("sender-footer");
+            if (footerEl && footer) footerEl.value = footer;
+            const img = document.getElementById("sender-logo-preview");
+            if (img) {
+                if (logo) { img.src = logo; img.style.display = "block"; }
+                else { img.removeAttribute("src"); img.style.display = "none"; }
+            }
+        } catch (e) { console.error("Absender laden:", e); }
+    },
+
+    saveSenderConfig: async function() {
+        if (!ImmoApp.db || !ImmoApp.db.instance) { alert("Datenbank noch nicht initialisiert."); return; }
+        const db = ImmoApp.db.instance;
+        const v = (id) => document.getElementById(id)?.value || "";
+        try {
+            await db.settings.put({ key: "senderName", value: v("sender-name") });
+            await db.settings.put({ key: "senderStreet", value: v("sender-street") });
+            await db.settings.put({ key: "senderZip", value: v("sender-zip") });
+            await db.settings.put({ key: "senderCity", value: v("sender-city") });
+            await db.settings.put({ key: "senderCountry", value: v("sender-country") });
+            await db.settings.put({ key: "senderIban", value: v("sender-iban") });
+            await db.settings.put({ key: "senderPlace", value: v("sender-place") });
+            const footerEl = document.getElementById("sender-footer");
+            await db.settings.put({ key: "senderFooter", value: footerEl ? (footerEl.value || "") : "" });
+
+            // Logo nur aktualisieren, wenn eine Datei gewählt ist (sonst bestehenden Wert beibehalten)
+            const logoInput = document.getElementById("sender-logo");
+            const file = logoInput && logoInput.files && logoInput.files[0] ? logoInput.files[0] : null;
+            if (file) {
+                const dataUrl = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(String(reader.result || ""));
+                    reader.onerror = () => reject(new Error("Logo konnte nicht gelesen werden."));
+                    reader.readAsDataURL(file);
+                });
+                await db.settings.put({ key: "senderLogoDataUrl", value: dataUrl });
+                const img = document.getElementById("sender-logo-preview");
+                if (img) { img.src = dataUrl; img.style.display = "block"; }
+            }
+            alert("Absenderdaten gespeichert.");
+        } catch (e) { console.error(e); alert("Fehler beim Speichern."); }
+    },
+
+    clearSenderLogo: async function() {
+        if (!ImmoApp.db || !ImmoApp.db.instance) return;
+        const db = ImmoApp.db.instance;
+        await db.settings.put({ key: "senderLogoDataUrl", value: "" });
+        const logoInput = document.getElementById("sender-logo");
+        if (logoInput) logoInput.value = "";
+        const img = document.getElementById("sender-logo-preview");
+        if (img) { img.removeAttribute("src"); img.style.display = "none"; }
+        alert("Logo wurde entfernt.");
+    },
+
+    /** Liefert Absenderdaten für Anschreiben/NK-Abrechnung (aus Settings). */
+    getSenderConfig: async function() {
+        if (!ImmoApp.db || !ImmoApp.db.instance) return {};
+        const db = ImmoApp.db.instance;
+        const get = (k) => db.settings.get(k).then(r => (r && r.value != null && r.value !== "") ? String(r.value) : "");
+        return {
+            name: await get("senderName"),
+            street: await get("senderStreet"),
+            zip: await get("senderZip"),
+            city: await get("senderCity"),
+            country: await get("senderCountry"),
+            iban: await get("senderIban"),
+            place: await get("senderPlace"),
+            footer: await get("senderFooter"),
+            logoDataUrl: await get("senderLogoDataUrl")
+        };
+    },
+
     buildExportObject: async function() {
         const db = ImmoApp.db.instance;
         const data = {};
         
+        // Absenderdaten (für Anschreiben/NK-Abrechnung) immer mitsichern
+        try {
+            if (this.getSenderConfig) {
+                data.senderConfig = await this.getSenderConfig();
+            }
+        } catch (e) {
+            console.warn("Absenderdaten konnten nicht exportiert werden:", e);
+        }
+
         if(document.getElementById('exp-prop').checked) data.properties = await db.properties.toArray();
         if(document.getElementById('exp-tenant').checked) data.tenants = await db.tenants.toArray();
         if(document.getElementById('exp-util').checked) data.utilities = await db.utilities.toArray();
@@ -234,6 +390,18 @@ window.ImmoApp.settings = {
         const db = ImmoApp.db.instance;
         let msg = "Folgende Daten wurden erfolgreich importiert:\n\n";
                 
+        // Absenderdaten (falls vorhanden) wiederherstellen
+        if (data.senderConfig && typeof data.senderConfig === "object") {
+            const sc = data.senderConfig || {};
+            await db.settings.put({ key: "senderName", value: sc.name || "" });
+            await db.settings.put({ key: "senderStreet", value: sc.street || "" });
+            await db.settings.put({ key: "senderZip", value: sc.zip || "" });
+            await db.settings.put({ key: "senderCity", value: sc.city || "" });
+            await db.settings.put({ key: "senderCountry", value: sc.country || "" });
+            await db.settings.put({ key: "senderIban", value: sc.iban || "" });
+            msg += `✅ Absenderdaten (Anschreiben/NK)\n`;
+        }
+
         if (data.properties && data.properties.length > 0) {
             await db.properties.bulkPut(data.properties);
             msg += `✅ ${data.properties.length} Objekte/WGs\n`;
@@ -584,5 +752,7 @@ window.ImmoApp.settings = {
 
     render: async function() {
         this.setupHTML();
+        await this.loadGoogleConfig();
+        await this.loadSenderConfig();
     }
 };

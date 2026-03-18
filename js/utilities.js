@@ -88,7 +88,7 @@ window.ImmoApp.utilities = {
                 <div id="util-view-export" class="hidden">
                     <div class="bg-blue-50 border border-blue-200 p-6 rounded-lg mb-6">
                         <h2 class="text-xl font-bold text-blue-800 mb-4">1-Klick Abrechnungs-Generator</h2>
-                        <div class="flex gap-4 items-end">
+                        <div class="flex flex-col md:flex-row gap-4 items-end">
                             <div class="w-1/3">
                                 <label class="block text-sm font-bold mb-1 text-blue-800">1. Objekt wählen</label>
                                 <select id="export-prop-select" class="w-full border rounded p-2" onchange="ImmoApp.utilities.loadTenantsForExport()">
@@ -104,6 +104,27 @@ window.ImmoApp.utilities = {
                             <div class="w-1/3">
                                 <button onclick="ImmoApp.utilities.generateStatementPreview()" class="w-full bg-blue-600 text-white font-bold py-2 rounded shadow hover:bg-blue-700">📄 Vorschau generieren</button>
                             </div>
+                        </div>
+                        <div class="mt-4 flex flex-col md:flex-row gap-4 items-end">
+                            <div class="w-full md:w-1/2">
+                                <label class="block text-sm font-bold mb-1 text-blue-800">NK-Zeitraum Start (optional)</label>
+                                <input type="date" id="nk-period-start" class="w-full border rounded p-2 text-sm bg-white">
+                            </div>
+                            <div class="w-full md:w-1/2">
+                                <label class="block text-sm font-bold mb-1 text-blue-800">NK-Zeitraum Ende (optional)</label>
+                                <input type="date" id="nk-period-end" class="w-full border rounded p-2 text-sm bg-white">
+                            </div>
+                        </div>
+                        <div class="mt-4 flex flex-col md:flex-row gap-3">
+                            <button onclick="ImmoApp.utilities.bulkDownloadNkDocxForProperty()" class="w-full md:w-auto bg-indigo-600 text-white font-bold py-2 px-4 rounded shadow hover:bg-indigo-700">
+                                🧾 NK-Abrechnungen (DOCX) für alle Mieter dieses Objekts
+                            </button>
+                            <button onclick="ImmoApp.utilities.bulkDownloadLettersDocxForProperty()" class="w-full md:w-auto bg-blue-600 text-white font-bold py-2 px-4 rounded shadow hover:bg-blue-700">
+                                📄 Anschreiben (DOCX) für alle Mieter dieses Objekts
+                            </button>
+                            <p class="text-xs text-blue-700 md:pt-2">
+                                Hinweis: Lädt mehrere Dateien nacheinander herunter (Browser-Download-Popups ggf. erlauben).
+                            </p>
                         </div>
                     </div>
 
@@ -509,24 +530,199 @@ window.ImmoApp.utilities = {
         tenantSelect.disabled = false;
     },
 
-    generateStatementPreview: async function() {
-        const propId = parseInt(document.getElementById("export-prop-select").value);
-        const tenantId = parseInt(document.getElementById("export-tenant-select").value);
-        
-        if(!propId || !tenantId) return alert("Bitte Objekt und Mieter auswählen!");
+    bulkDownloadNkDocxForProperty: async function() {
+        const propIdStr = document.getElementById("export-prop-select")?.value || "";
+        const propId = parseInt(propIdStr, 10);
+        if (!propId) {
+            alert("Bitte zuerst ein Objekt wählen (Tab 2: Abrechnungen generieren).");
+            return;
+        }
+        if (!window.ImmoApp || !ImmoApp.tenants || !ImmoApp.tenants.downloadUtilitiesDocx) {
+            alert("Mieter-Modul ist nicht geladen (DOCX-Funktion fehlt). Bitte Seite neu laden.");
+            return;
+        }
 
         const db = ImmoApp.db.instance;
         const year = ImmoApp.ui.currentYear;
-        
-        const property = await db.properties.get(propId);
-        const targetTenant = await db.tenants.get(tenantId);
-        const allUtils = await db.utilities.where('year').equals(year).filter(u => u.propertyId === propId).toArray();
-        const allTenants = await db.tenants.where('propertyId').equals(propId).toArray();
+        const nkStartISO = document.getElementById("nk-period-start")?.value || "";
+        const nkEndISO = document.getElementById("nk-period-end")?.value || "";
+        const parseISODate = (s) => {
+            if (!s) return null;
+            const parts = String(s).split("-");
+            if (parts.length !== 3) return null;
+            const y = parseInt(parts[0], 10);
+            const m = parseInt(parts[1], 10);
+            const d = parseInt(parts[2], 10);
+            if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+            return new Date(y, m - 1, d);
+        };
+        const periodStart = parseISODate(nkStartISO);
+        const periodEnd = parseISODate(nkEndISO);
+        const usePeriod = !!(periodStart && periodEnd);
 
-        if(targetTenant.isFlatRate) {
-            this.generateFlatRateStatement(targetTenant, property, year);
+        const property = await db.properties.get(propId);
+        const tenants = await db.tenants.where('propertyId').equals(propId).toArray();
+        const msDay = 24 * 60 * 60 * 1000;
+        const activeTenants = usePeriod
+            ? tenants.filter(t => {
+                if (t.isFlatRate) return false;
+                const moveIn = t.moveIn ? new Date(t.moveIn) : new Date(0);
+                const moveOut = t.moveOut ? new Date(t.moveOut) : new Date(8640000000000000);
+                const from = moveIn > periodStart ? moveIn : periodStart;
+                const to = moveOut < periodEnd ? moveOut : periodEnd;
+                const days = (to > from) ? Math.round((to - from) / msDay) : 0;
+                return days > 0;
+            })
+            : tenants.filter(t => ImmoApp.utils.getActiveMonthsInYear(t.moveIn, t.moveOut, year) > 0 && !t.isFlatRate);
+
+        if (activeTenants.length === 0) {
+            alert("Keine aktiven (nicht-pausschalen) Mieter für dieses Objekt im gewählten Jahr gefunden.");
             return;
         }
+
+        if (!confirm(`Sollen ${activeTenants.length} DOCX-Dateien für "${property ? property.name : ('Objekt #' + propId)}" erzeugt und heruntergeladen werden?`)) {
+            return;
+        }
+
+        // Kurzer Delay zwischen Downloads, damit Browser nicht blockiert
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+        for (const t of activeTenants) {
+            try {
+                await ImmoApp.tenants.downloadUtilitiesDocx(t.id, null, null, null, null, nkStartISO, nkEndISO);
+                await sleep(600);
+            } catch (e) {
+                console.error("Fehler beim DOCX-Export für", t, e);
+            }
+        }
+        alert("Fertig: DOCX-Abrechnungen wurden gestartet. Falls Downloads blockiert wurden, bitte im Browser erlauben und erneut klicken.");
+    },
+
+    bulkDownloadLettersDocxForProperty: async function() {
+        const propIdStr = document.getElementById("export-prop-select")?.value || "";
+        const propId = parseInt(propIdStr, 10);
+        if (!propId) {
+            alert("Bitte zuerst ein Objekt wählen (Tab 2: Abrechnungen generieren).");
+            return;
+        }
+        if (!window.ImmoApp || !ImmoApp.tenants || !ImmoApp.tenants.downloadLetterDocx) {
+            alert("Mieter-Modul ist nicht geladen (DOCX-Funktion fehlt). Bitte Seite neu laden.");
+            return;
+        }
+
+        const db = ImmoApp.db.instance;
+        const year = ImmoApp.ui.currentYear;
+        const property = await db.properties.get(propId);
+        const tenants = await db.tenants.where('propertyId').equals(propId).toArray();
+        const activeTenants = tenants.filter(t => ImmoApp.utils.getActiveMonthsInYear(t.moveIn, t.moveOut, year) > 0);
+
+        if (activeTenants.length === 0) {
+            alert("Keine aktiven Mieter für dieses Objekt im gewählten Jahr gefunden.");
+            return;
+        }
+
+        const subject = `Anschreiben ${year} – ${property ? property.name : ('Objekt #' + propId)}`;
+        const body = `Sehr geehrte Damen und Herren,\n\nhiermit erhalten Sie ein Anschreiben der Hausverwaltung.\n\nMit freundlichen Grüßen\n__________________________`;
+
+        if (!confirm(`Sollen ${activeTenants.length} DOCX-Dateien (Anschreiben) für "${property ? property.name : ('Objekt #' + propId)}" erzeugt und heruntergeladen werden?`)) {
+            return;
+        }
+
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+        for (const t of activeTenants) {
+            try {
+                await ImmoApp.tenants.downloadLetterDocx(t.id, subject, body);
+                await sleep(600);
+            } catch (e) {
+                console.error("Fehler beim Anschreiben-DOCX für", t, e);
+            }
+        }
+        alert("Fertig: Anschreiben-DOCX Downloads wurden gestartet. Falls Downloads blockiert wurden, bitte im Browser erlauben und erneut klicken.");
+    },
+
+    generateStatementPreview: async function() {
+        try {
+            const propEl = document.getElementById("export-prop-select");
+            const tenantEl = document.getElementById("export-tenant-select");
+            const propId = parseInt(propEl?.value || "", 10);
+            const tenantId = parseInt(tenantEl?.value || "", 10);
+            if(!Number.isFinite(propId) || !Number.isFinite(tenantId)) {
+                alert("Bitte Objekt und Mieter auswählen!");
+                return;
+            }
+
+            const db = ImmoApp.db.instance;
+            const currentYear = ImmoApp.ui.currentYear;
+
+            const periodStartInput = document.getElementById("nk-period-start")?.value || "";
+            const periodEndInput = document.getElementById("nk-period-end")?.value || "";
+
+            const parseDateInput = (s) => {
+                if(!s) return null;
+                const parts = String(s).split("-");
+                if(parts.length !== 3) return null;
+                const y = parseInt(parts[0], 10);
+                const m = parseInt(parts[1], 10);
+                const d = parseInt(parts[2], 10);
+                if(!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+                return new Date(y, m - 1, d);
+            };
+
+            let periodStart = parseDateInput(periodStartInput);
+            let periodEnd = parseDateInput(periodEndInput);
+            const fallbackYear = parseInt(currentYear, 10);
+            if(!periodStart || !periodEnd) {
+                periodStart = new Date(fallbackYear, 0, 1);
+                periodEnd = new Date(fallbackYear, 11, 31);
+            }
+            if(periodEnd < periodStart) {
+                alert("NK-Zeitraum: Start-Datum muss vor dem End-Datum liegen.");
+                return;
+            }
+
+            const formatDE = (dt) => {
+                const day = String(dt.getDate()).padStart(2, '0');
+                const mon = String(dt.getMonth() + 1).padStart(2, '0');
+                const yr = dt.getFullYear();
+                return `${day}.${mon}.${yr}`;
+            };
+
+            const periodLabel = `${formatDE(periodStart)} - ${formatDE(periodEnd)}`;
+
+            const startYear = periodStart.getFullYear();
+            const endYear = periodEnd.getFullYear();
+            const yearsToInclude = [];
+            for(let y = startYear; y <= endYear; y++) yearsToInclude.push(String(y));
+
+            const property = await db.properties.get(propId);
+            const targetTenant = await db.tenants.get(tenantId);
+
+            const sender = (ImmoApp.settings && ImmoApp.settings.getSenderConfig) ? await ImmoApp.settings.getSenderConfig() : {};
+            const senderLines = [sender.name, sender.street, [sender.zip, sender.city].filter(Boolean).join(' '), sender.country].filter(Boolean);
+            const safeSenderLinesHtml = senderLines.map(l => (l || '').replace(/</g, '&lt;')).join('<br>');
+            const logoBlock = sender.logoDataUrl
+                ? `<div style="display:flex;justify-content:flex-start;margin-bottom:10px;">
+                        <img src="${sender.logoDataUrl}" alt="Logo" style="max-height:60px;max-width:220px;object-fit:contain;">
+                   </div>`
+                : '';
+            const senderBlock = (logoBlock || senderLines.length > 0)
+                ? `<div style="font-size:12px;color:#374151;line-height:1.4;margin-bottom:10px;">${logoBlock}${safeSenderLinesHtml}</div>`
+                : '';
+            const footerText = (sender.footer || '').trim();
+            const footerBlock = `<div id="statement-footer" contenteditable="true" style="outline:none;white-space:pre-line;margin-top:18px;padding-top:10px;border-top:1px solid #e5e7eb;font-size:11px;color:#6b7280;">${(footerText || '').replace(/</g,'&lt;')}</div>`;
+
+            if(targetTenant?.isFlatRate) {
+                // Pauschal-Texte sind aktuell kalenderjahr-basiert; wir nutzen das aktuelle UI-Jahr.
+                await this.generateFlatRateStatement(targetTenant, property, currentYear);
+                return;
+            }
+
+        // Kosten & Mieter fürs Objekt laden (über mehrere Jahre im Zeitraum)
+        const allUtils = [];
+        for(const yStr of yearsToInclude) {
+            const arr = await db.utilities.where('year').equals(yStr).filter(u => u.propertyId === propId).toArray();
+            allUtils.push(...arr);
+        }
+        const allTenants = await db.tenants.where('propertyId').equals(propId).toArray();
 
         const uncategorized = allUtils.filter(u => !u.category || !u.splitKey);
         if(uncategorized.length > 0) {
@@ -534,79 +730,138 @@ window.ImmoApp.utilities = {
             return;
         }
 
-        let totalSqm = 0, totalPersons = 0, totalUnits = 0;
+        const normSqm = (v) => {
+            const n = parseFloat(v);
+            return Number.isFinite(n) && n > 0 ? n : 1;
+        };
+        const normPersons = (v) => {
+            const n = parseInt(v, 10);
+            return Number.isFinite(n) && n > 0 ? n : 1;
+        };
+        const msDay = 24 * 60 * 60 * 1000;
+        const calcOverlapDaysInYear = (t, yearNum) => {
+            const mi = t.moveIn ? new Date(t.moveIn) : new Date(0);
+            const mo = t.moveOut ? new Date(t.moveOut) : new Date(8640000000000000);
+            const yStart = new Date(yearNum, 0, 1);
+            const yEnd = new Date(yearNum, 11, 31);
+            const from = new Date(Math.max(yStart.getTime(), periodStart.getTime(), mi.getTime()));
+            const to = new Date(Math.min(yEnd.getTime(), periodEnd.getTime(), mo.getTime()));
+            return to > from ? Math.round((to - from) / msDay) : 0;
+        };
 
-        const activeTenants = allTenants.map(t => {
-            const months = ImmoApp.utils.getActiveMonthsInYear(t.moveIn, t.moveOut, year);
-            return { ...t, activeMonths: months };
-        }).filter(t => t.activeMonths > 0);
-
-        activeTenants.forEach(t => {
-            const timeFactor = t.activeMonths / 12;
-            totalSqm += (parseFloat(t.sqm) || 0) * timeFactor;
-            totalPersons += (parseInt(t.persons) || 0) * timeFactor;
-            totalUnits += 1 * timeFactor;
-        });
-
-        const targetMonths = targetTenant.activeMonths || ImmoApp.utils.getActiveMonthsInYear(targetTenant.moveIn, targetTenant.moveOut, year);
-        const targetTimeFactor = targetMonths / 12;
-
-        let tableRows = '';
-        let totalTenantCost = 0;
-        const groupedUtils = {};
-        
-        allUtils.forEach(u => {
-            if(!groupedUtils[u.category]) groupedUtils[u.category] = { amount: 0, key: u.splitKey };
-            groupedUtils[u.category].amount += u.amount;
-        });
-
-        for (const [category, data] of Object.entries(groupedUtils)) {
-            let myShare = 0;
-            let shareText = "";
-
-            if (data.key === 'WG') {
-                continue; 
-            } else if (data.key === 'DIRECT') {
-                shareText = "100% Direkt"; 
-                myShare = 0; 
-            } else if (data.key === 'SQM') {
-                const fraction = (parseFloat(targetTenant.sqm) || 0) / (totalSqm || 1);
-                myShare = data.amount * fraction * targetTimeFactor;
-                shareText = `${targetTenant.sqm || 0} von ${totalSqm.toFixed(1)} m²`;
-            } else if (data.key === 'PERSONS') {
-                const fraction = (parseInt(targetTenant.persons) || 0) / (totalPersons || 1);
-                myShare = data.amount * fraction * targetTimeFactor;
-                shareText = `${targetTenant.persons || 0} von ${totalPersons.toFixed(1)} Personen`;
-            } else if (data.key === 'UNITS') {
-                const fraction = 1 / (totalUnits || 1);
-                myShare = data.amount * fraction * targetTimeFactor;
-                shareText = `1 von ${totalUnits.toFixed(1)} Einheiten`;
+        const getActiveMonthsInPeriodForTenantYear = (t, yearNum) => {
+            // ImmoApp.utils.getActiveMonthsInYear() liefert hier nur eine Monatsanzahl,
+            // aber wir brauchen für die weitere Logik die konkreten Monate (für .length).
+            const mi = t.moveIn ? new Date(t.moveIn) : new Date(0);
+            const mo = t.moveOut ? new Date(t.moveOut) : new Date(8640000000000000);
+            const months = [];
+            for(let mIdx = 0; mIdx < 12; mIdx++) {
+                const check = new Date(yearNum, mIdx, 15);
+                if(check < mi || check > mo) continue; // nicht in Mietzeit
+                if(check < periodStart || check > periodEnd) continue; // nicht im NK-Zeitraum
+                months.push(mIdx);
             }
+            return months;
+        };
 
-            totalTenantCost += myShare;
+        const categoryAmountTotal = {};
+        const categoryMyShareTotal = {};
+        let totalTenantCost = 0;
+        let totalTargetMonths = 0;
 
+        for(const yStr of yearsToInclude) {
+            const yearNum = parseInt(yStr, 10);
+            const yearUtils = allUtils.filter(u => String(u.year) === yStr);
+
+            const yearGroupedUtils = {};
+            yearUtils.forEach(u => {
+                if(!yearGroupedUtils[u.category]) yearGroupedUtils[u.category] = { amount: 0, key: u.splitKey };
+                yearGroupedUtils[u.category].amount += u.amount;
+            });
+
+            // Gewichte für Schlüssel innerhalb des Jahres (aber nur im gewählten Zeitraum)
+            let totalSqmDays = 0, totalPersonDays = 0, totalUnitDays = 0;
+            const activeTenants = allTenants.map(t => ({ ...t }))
+                .filter(t => getActiveMonthsInPeriodForTenantYear(t, yearNum).length > 0);
+
+            activeTenants.forEach(t => {
+                const days = calcOverlapDaysInYear(t, yearNum);
+                if(days <= 0) return;
+                totalSqmDays += normSqm(t.sqm) * days;
+                totalPersonDays += normPersons(t.persons) * days;
+                totalUnitDays += 1 * days;
+            });
+
+            const targetMonthsYear = getActiveMonthsInPeriodForTenantYear(targetTenant, yearNum).length;
+            totalTargetMonths += targetMonthsYear;
+            const expectedPrepaymentYearFactor = targetMonthsYear;
+
+            // Kosten (aus dem Jahr) auf den Mieter umlegen
+            const targetDays = calcOverlapDaysInYear(targetTenant, yearNum);
+            for(const [category, data] of Object.entries(yearGroupedUtils)) {
+                let myShare = 0;
+                if (data.key === 'WG') {
+                    continue;
+                } else if (data.key === 'DIRECT') {
+                    myShare = 0;
+                } else if (data.key === 'SQM') {
+                    const mySqmDays = normSqm(targetTenant.sqm) * targetDays;
+                    const fraction = mySqmDays / (totalSqmDays || 1);
+                    myShare = data.amount * fraction;
+                } else if (data.key === 'PERSONS') {
+                    const myPersonDays = normPersons(targetTenant.persons) * targetDays;
+                    const fraction = myPersonDays / (totalPersonDays || 1);
+                    myShare = data.amount * fraction;
+                } else if (data.key === 'UNITS') {
+                    const myUnitDays = 1 * targetDays;
+                    const fraction = myUnitDays / (totalUnitDays || 1);
+                    myShare = data.amount * fraction;
+                }
+
+                if(!categoryAmountTotal[category]) categoryAmountTotal[category] = 0;
+                if(!categoryMyShareTotal[category]) categoryMyShareTotal[category] = 0;
+                categoryAmountTotal[category] += data.amount;
+                categoryMyShareTotal[category] += myShare;
+                totalTenantCost += myShare;
+            }
+        }
+
+        const expectedPrepayment = (parseFloat(targetTenant.prepayment) || 0) * totalTargetMonths;
+        const balance = expectedPrepayment - totalTenantCost;
+        let balanceText = balance >= 0
+            ? `<span style="color: green;">Ihr Guthaben beträgt: <b>${ImmoApp.ui.formatCurrency(balance)}</b></span>`
+            : `<span style="color: red;">Ihre Nachzahlung beträgt: <b>${ImmoApp.ui.formatCurrency(Math.abs(balance))}</b></span>`;
+
+        const today = new Date().toLocaleDateString('de-DE');
+        const placeStr = (sender.place || sender.city || '').trim();
+        const placeDate = placeStr ? `${placeStr}, ${today}` : today;
+
+        const paymentDefault = `Zahlungshinweise (editierbar):\n- Nachzahlung bitte innerhalb von 14 Tagen überweisen (falls Nachzahlung).\n- Ein Guthaben wird erstattet oder mit der nächsten Zahlung verrechnet (falls Guthaben).\n- Verwendungszweck: Nebenkosten ${periodLabel} – ${targetTenant.name}\n- Bankverbindung: _______________________`;
+
+        // Tabelle bauen (mit Anteil in %)
+        let tableRows = '';
+        const categories = Object.keys(categoryAmountTotal).sort((a,b)=>a.localeCompare(b));
+        for(const category of categories) {
+            const amountTotal = categoryAmountTotal[category] || 0;
+            const myShareTotal = categoryMyShareTotal[category] || 0;
+            const sharePercent = amountTotal ? (myShareTotal / amountTotal * 100) : 0;
             tableRows += `
                 <tr style="border-bottom: 1px solid #ddd;">
                     <td style="padding: 8px;">${category}</td>
-                    <td style="padding: 8px; text-align: right;">${ImmoApp.ui.formatCurrency(data.amount)}</td>
-                    <td style="padding: 8px; text-align: center;">${shareText}</td>
-                    <td style="padding: 8px; text-align: right; font-weight: bold;">${ImmoApp.ui.formatCurrency(myShare)}</td>
+                    <td style="padding: 8px; text-align: right;">${ImmoApp.ui.formatCurrency(amountTotal)}</td>
+                    <td style="padding: 8px; text-align: center;">${sharePercent.toFixed(2).replace('.', ',')} %</td>
+                    <td style="padding: 8px; text-align: right; font-weight: bold;">${ImmoApp.ui.formatCurrency(myShareTotal)}</td>
                 </tr>
             `;
         }
 
-        const expectedPrepayment = (parseFloat(targetTenant.prepayment) || 0) * targetMonths;
-        const balance = expectedPrepayment - totalTenantCost;
-        let balanceText = balance >= 0 
-            ? `<span style="color: green;">Ihr Guthaben beträgt: <b>${ImmoApp.ui.formatCurrency(balance)}</b></span>` 
-            : `<span style="color: red;">Ihre Nachzahlung beträgt: <b>${ImmoApp.ui.formatCurrency(Math.abs(balance))}</b></span>`;
-
-        const today = new Date().toLocaleDateString('de-DE');
-        
         const docHTML = `
+            ${senderBlock}
             <div style="margin-bottom: 40px;">
-                <h1 style="font-size: 24px; color: #333; margin-bottom: 5px;">Nebenkostenabrechnung ${year}</h1>
-                <p style="color: #777; margin-top: 0;">Erstellt am ${today}</p>
+                <div style="font-size:12px;color:#374151;font-weight:700;margin-bottom:6px;">Betreff (editierbar):</div>
+                <div id="statement-subject" contenteditable="true" style="outline:none;border:1px dashed #c7d2fe;background:#eef2ff;border-radius:6px;padding:8px;font-size:12px;color:#312e81;margin-bottom:10px;">Nebenkostenabrechnung ${periodLabel} – ${property.name} – ${targetTenant.name}</div>
+                <h1 style="font-size: 24px; color: #333; margin-bottom: 5px;">Nebenkostenabrechnung ${periodLabel}</h1>
+                <p style="color: #777; margin-top: 0;">Erstellt am ${placeDate}</p>
             </div>
             
             <div style="margin-bottom: 30px; display: flex; justify-content: space-between;">
@@ -616,12 +871,15 @@ window.ImmoApp.utilities = {
                 </div>
                 <div style="text-align: right;">
                     <p style="margin: 2px 0;"><strong>Abrechnungszeitraum:</strong></p>
-                    <p style="margin: 2px 0;">01.01.${year} - 31.12.${year} (${targetMonths} Monate)</p>
+                    <p style="margin: 2px 0;">${periodLabel} (${totalTargetMonths} Monate)</p>
                 </div>
             </div>
 
-            <p style="margin-bottom: 20px;">Sehr geehrte(r) Herr/Frau ${targetTenant.name.split(' ').pop()},</p>
-            <p style="margin-bottom: 20px;">anbei erhalten Sie Ihre Betriebskostenabrechnung für das Jahr ${year}. Die Gesamtkosten des Hauses wurden anteilig auf Ihre Mietzeit und den gesetzlichen Umlageschlüssel umgelegt.</p>
+            <div id="statement-intro" contenteditable="true" style="outline:none;border:1px dashed #e5e7eb;border-radius:6px;padding:10px;margin-bottom:16px;white-space:pre-line;">
+Sehr geehrte(r) Herr/Frau ${targetTenant.name.split(' ').pop()},
+
+anbei erhalten Sie Ihre Betriebskostenabrechnung für den gewählten Zeitraum. Die Gesamtkosten des Hauses wurden anteilig auf Ihre Mietzeit und den gesetzlichen Umlageschlüssel umgelegt.
+            </div>
 
             <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px; font-size: 14px;">
                 <thead>
@@ -650,7 +908,7 @@ window.ImmoApp.utilities = {
                         <td style="text-align: right; padding: 5px 0;">${ImmoApp.ui.formatCurrency(totalTenantCost)}</td>
                     </tr>
                     <tr>
-                        <td style="padding: 5px 0; border-bottom: 1px solid #ccc;">Abzüglich geleisteter Vorauszahlungen (Soll: ${targetMonths}x ${ImmoApp.ui.formatCurrency(targetTenant.prepayment)}):</td>
+                        <td style="padding: 5px 0; border-bottom: 1px solid #ccc;">Abzüglich geleisteter Vorauszahlungen (Soll: ${totalTargetMonths}x ${ImmoApp.ui.formatCurrency(targetTenant.prepayment)}):</td>
                         <td style="text-align: right; padding: 5px 0; border-bottom: 1px solid #ccc;">- ${ImmoApp.ui.formatCurrency(expectedPrepayment)}</td>
                     </tr>
                     <tr>
@@ -660,23 +918,50 @@ window.ImmoApp.utilities = {
                 </table>
             </div>
             
-            <p style="margin-top: 40px;">Wir bitten Sie, eine eventuelle Nachzahlung innerhalb von 14 Tagen auf das bekannte Mietkonto zu überweisen. Ein eventuelles Guthaben wird Ihnen erstattet.</p>
+            <div id="statement-payment" contenteditable="true" style="outline:none;margin-top:16px;border:1px solid #e5e7eb;border-radius:8px;padding:12px;background:#f9fafb;white-space:pre-line;">
+${paymentDefault}
+            </div>
             <p style="margin-top: 40px;">Mit freundlichen Grüßen</p>
             <p style="margin-top: 10px;">Ihre Hausverwaltung</p>
+            ${footerBlock}
         `;
 
         document.getElementById('statement-doc').innerHTML = docHTML;
-        document.getElementById('statement-preview-container').classList.remove('hidden');
+            document.getElementById('statement-preview-container').classList.remove('hidden');
+        } catch (e) {
+            console.error("Fehler in generateStatementPreview:", e);
+            alert(`Fehler bei Vorschau: ${e?.message || e}`);
+        }
     },
 
-    generateFlatRateStatement: function(tenant, property, year) {
-        const today = new Date().toLocaleDateString('de-DE');
+    generateFlatRateStatement: async function(tenant, property, year) {
+        const sender = (ImmoApp.settings && ImmoApp.settings.getSenderConfig) ? await ImmoApp.settings.getSenderConfig() : {};
+        const senderLines = [sender.name, sender.street, [sender.zip, sender.city].filter(Boolean).join(' '), sender.country].filter(Boolean);
+        const safeSenderLinesHtml = senderLines.map(l => (l || '').replace(/</g, '&lt;')).join('<br>');
+        const logoBlock = sender.logoDataUrl
+            ? `<div style="display:flex;justify-content:flex-start;margin-bottom:10px;">
+                    <img src="${sender.logoDataUrl}" alt="Logo" style="max-height:60px;max-width:220px;object-fit:contain;">
+               </div>`
+            : '';
+        const senderBlock = (logoBlock || senderLines.length > 0)
+            ? `<div style="font-size:12px;color:#374151;line-height:1.4;margin-bottom:10px;">${logoBlock}${safeSenderLinesHtml}</div>`
+            : '';
+
+        const todayDate = new Date();
+        const today = todayDate.toLocaleDateString('de-DE');
+        const placeStr = (sender.place || sender.city || '').trim();
+        const placeDate = placeStr ? `${placeStr}, ${today}` : today;
+
+        const footerText = (sender.footer || '').trim();
+        const footerBlock = `<div id="statement-footer" contenteditable="true" style="outline:none;white-space:pre-line;margin-top:18px;padding-top:10px;border-top:1px solid #e5e7eb;font-size:11px;color:#6b7280;">${(footerText || '').replace(/</g,'&lt;')}</div>`;
+
         const docHTML = `
+            ${senderBlock}
             <div style="margin-bottom: 40px;">
                 <h1 style="font-size: 24px; color: #333; margin-bottom: 5px;">Mietbescheinigung ${year}</h1>
-                <p style="color: #777; margin-top: 0;">Erstellt am ${today}</p>
+                <p style="color: #777; margin-top: 0;">Erstellt am ${placeDate}</p>
             </div>
-            
+
             <div style="margin-bottom: 30px; display: flex; justify-content: space-between;">
                 <div>
                     <p style="margin: 2px 0;"><strong>Mieter:</strong> ${tenant.name}</p>
@@ -687,13 +972,14 @@ window.ImmoApp.utilities = {
             <p style="margin-bottom: 20px;">Sehr geehrte(r) Herr/Frau ${tenant.name.split(' ').pop()},</p>
             <p style="margin-bottom: 20px;">hiermit bestätigen wir, dass Sie im Jahr ${year} mit uns einen Mietvertrag über eine Pauschalmiete / Warmmiete abgeschlossen haben.</p>
             <p style="margin-bottom: 20px;">Gemäß der vertraglichen Vereinbarung sind mit der monatlichen Mietzahlung in Höhe von <strong>${ImmoApp.ui.formatCurrency(tenant.rent)}</strong> alle anfallenden Betriebskosten vollständig abgegolten.</p>
-            
+
             <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; padding: 15px; border-radius: 4px; margin-top: 30px;">
                 <p style="margin: 0; color: #166534; font-weight: bold;">✅ Es erfolgt keine weitere Nachberechnung der Nebenkosten.</p>
             </div>
 
             <p style="margin-top: 40px;">Mit freundlichen Grüßen</p>
             <p style="margin-top: 10px;">Ihre Hausverwaltung</p>
+            ${footerBlock}
         `;
         document.getElementById('statement-doc').innerHTML = docHTML;
         document.getElementById('statement-preview-container').classList.remove('hidden');

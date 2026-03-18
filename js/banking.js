@@ -37,12 +37,16 @@ window.ImmoApp.banking = {
                         </div>
                     </div>
                     <div class="flex flex-col items-end gap-2">
-                        <button onclick="ImmoApp.banking.runAutoMatch()" class="bg-indigo-600 text-white px-4 py-2 rounded shadow hover:bg-indigo-700 text-sm font-bold whitespace-nowrap">🤖 Auto-Match starten</button>
-                        <button onclick="ImmoApp.banking.deleteAllTxs()" class="text-red-500 hover:text-red-700 hover:underline text-xs font-bold">⚠️ Alle Buchungen löschen (Reset)</button>
+                        <div class="flex gap-2">
+                            <button onclick="ImmoApp.banking.resetFilters()" class="border border-gray-300 text-gray-700 px-3 py-2 rounded shadow-sm hover:bg-gray-50 text-xs font-bold whitespace-nowrap">Filter zurücksetzen</button>
+                            <button onclick="ImmoApp.banking.runAutoMatch()" class="bg-indigo-600 text-white px-4 py-2 rounded shadow hover:bg-indigo-700 text-sm font-bold whitespace-nowrap">🤖 Auto-Match starten</button>
+                        </div>
+                        <button onclick="ImmoApp.banking.deleteAllTxs()" class="text-red-500 hover:text-red-700 hover:underline text-xs font-bold mt-1">⚠️ Alle Buchungen löschen (Reset)</button>
                     </div>
                 </div>
 
-                <div class="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden overflow-x-auto">
+                <!-- Desktop/Tablet: Tabellenansicht -->
+                <div class="hidden md:block bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden overflow-x-auto">
                     <table class="min-w-full divide-y divide-gray-200 text-sm">
                         <thead class="bg-gray-50">
                             <tr>
@@ -56,6 +60,9 @@ window.ImmoApp.banking = {
                         <tbody id="banking-table-body" class="bg-white divide-y divide-gray-200"></tbody>
                     </table>
                 </div>
+
+                <!-- Mobile: Kartenansicht -->
+                <div id="banking-cards" class="md:hidden space-y-3"></div>
             `;
         }
     },
@@ -69,6 +76,16 @@ window.ImmoApp.banking = {
 
     onStatusChange: function() {
         // Statuswechsel soll ebenfalls alle Mieter berücksichtigen
+        this.tenantFilterId = null;
+        this.tenantFilterName = null;
+        this.render();
+    },
+
+    resetFilters: function() {
+        const textInput = document.getElementById("banking-text-filter");
+        const statusSelect = document.getElementById("banking-status-filter");
+        if (textInput) textInput.value = "";
+        if (statusSelect) statusSelect.value = "ALL";
         this.tenantFilterId = null;
         this.tenantFilterName = null;
         this.render();
@@ -464,10 +481,17 @@ window.ImmoApp.banking = {
         });
 
         const tbody = document.getElementById("banking-table-body");
-        tbody.innerHTML = "";
+        const cardsContainer = document.getElementById("banking-cards");
+        if (tbody) tbody.innerHTML = "";
+        if (cardsContainer) cardsContainer.innerHTML = "";
 
         if (txs.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-8 text-center text-gray-500 italic">Keine Buchungen für dieses Jahr oder diesen Filter gefunden.</td></tr>`;
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-8 text-center text-gray-500 italic">Keine Buchungen für dieses Jahr oder diesen Filter gefunden.</td></tr>`;
+            }
+            if (cardsContainer) {
+                cardsContainer.innerHTML = `<div class="px-4 py-4 text-center text-gray-500 italic bg-white rounded-lg shadow-sm border border-gray-100">Keine Buchungen für dieses Jahr oder diesen Filter gefunden.</div>`;
+            }
             return;
         }
 
@@ -500,29 +524,61 @@ window.ImmoApp.banking = {
 
             const isManual = tx.importBatchId === 'manual' || tx.importBatchId === 'manual_history';
 
-            tbody.innerHTML += `
-                <tr class="hover:bg-gray-50 border-b">
-                    <td class="px-4 py-3 align-top whitespace-nowrap text-xs text-gray-500">
-                        ${
-                            isManual
-                                ? `<input type="text" value="${tx.date || ''}" class="w-20 border rounded px-1 text-xs"
-                                           onchange="ImmoApp.banking.updateTxDate(${tx.id}, this.value)" title="Datum ändern (TT.MM.JJ oder TT.MM.JJJJ)">`
-                                : (tx.date || '')
-                        }
-                    </td>
-                    <td class="px-4 py-3 align-top">
-                        <div class="mb-1">${nameLabel} <strong class="text-gray-800 font-bold text-sm">${tx.name || 'Unbekannt'}</strong></div>
-                        <div class="text-xs text-gray-600 break-words">${tx.purpose || ''}</div>
-                    </td>
-                    <td class="px-4 py-3 align-top text-right font-bold ${amountColor} whitespace-nowrap">${ImmoApp.ui.formatCurrency(tx.amount)}</td>
-                    <td class="px-4 py-3 align-top">${selectHtml}</td>
-                    <td class="px-4 py-3 align-top text-right space-x-1">
-                        <button onclick="ImmoApp.banking.createTenantFromTx(${tx.id})" class="text-xs bg-green-50 border border-green-300 px-2 py-1 rounded hover:bg-green-100" title="Neuen Mieter aus dieser Buchung anlegen">👤+</button>
-                        <button onclick="ImmoApp.banking.splitToDepositAndRent(${tx.id})" class="text-xs bg-gray-50 border border-gray-300 px-2 py-1 rounded hover:bg-gray-100" title="Zahlung in Kaution + Miete aufteilen">➗</button>
-                        <button onclick="ImmoApp.banking.deleteTx(${tx.id})" class="text-red-500 hover:bg-red-50 p-1 rounded" title="Buchung löschen">🗑️</button>
-                    </td>
-                </tr>
-            `;
+            if (tbody) {
+                tbody.innerHTML += `
+                    <tr class="hover:bg-gray-50 border-b">
+                        <td class="px-4 py-3 align-top whitespace-nowrap text-xs text-gray-500">
+                            ${
+                                isManual
+                                    ? `<input type="text" value="${tx.date || ''}" class="w-20 border rounded px-1 text-xs"
+                                               onchange="ImmoApp.banking.updateTxDate(${tx.id}, this.value)" title="Datum ändern (TT.MM.JJ oder TT.MM.JJJJ)">`
+                                    : (tx.date || '')
+                            }
+                        </td>
+                        <td class="px-4 py-3 align-top">
+                            <div class="mb-1">${nameLabel} <strong class="text-gray-800 font-bold text-sm">${tx.name || 'Unbekannt'}</strong></div>
+                            <div class="text-xs text-gray-600 break-words">${tx.purpose || ''}</div>
+                        </td>
+                        <td class="px-4 py-3 align-top text-right font-bold ${amountColor} whitespace-nowrap">${ImmoApp.ui.formatCurrency(tx.amount)}</td>
+                        <td class="px-4 py-3 align-top">${selectHtml}</td>
+                        <td class="px-4 py-3 align-top text-right space-x-1">
+                            <button onclick="ImmoApp.banking.createTenantFromTx(${tx.id})" class="text-xs bg-green-50 border border-green-300 px-2 py-1 rounded hover:bg-green-100" title="Neuen Mieter aus dieser Buchung anlegen">👤+</button>
+                            <button onclick="ImmoApp.banking.splitToDepositAndRent(${tx.id})" class="text-xs bg-gray-50 border border-gray-300 px-2 py-1 rounded hover:bg-gray-100" title="Zahlung in Kaution + Miete aufteilen">➗</button>
+                            <button onclick="ImmoApp.banking.deleteTx(${tx.id})" class="text-red-500 hover:bg-red-50 p-1 rounded" title="Buchung löschen">🗑️</button>
+                        </td>
+                    </tr>
+                `;
+            }
+
+            if (cardsContainer) {
+                cardsContainer.innerHTML += `
+                    <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-3 text-sm">
+                        <div class="flex justify-between items-center mb-1">
+                            <div class="text-xs text-gray-500">
+                                ${isManual
+                                    ? `<input type="text" value="${tx.date || ''}" class="w-24 border rounded px-1 text-xs"
+                                               onchange="ImmoApp.banking.updateTxDate(${tx.id}, this.value)" title="Datum ändern (TT.MM.JJ oder TT.MM.JJJJ)">`
+                                    : (tx.date || '')
+                                }
+                            </div>
+                            <div class="font-bold ${amountColor}">${ImmoApp.ui.formatCurrency(tx.amount)}</div>
+                        </div>
+                        <div class="mb-1">
+                            ${nameLabel}
+                            <span class="font-bold text-gray-800">${tx.name || 'Unbekannt'}</span>
+                        </div>
+                        <div class="text-xs text-gray-600 mb-2 break-words">${tx.purpose || ''}</div>
+                        <div class="mb-2">
+                            ${selectHtml}
+                        </div>
+                        <div class="flex justify-end gap-2">
+                            <button onclick="ImmoApp.banking.createTenantFromTx(${tx.id})" class="text-xs bg-green-50 border border-green-300 px-2 py-1 rounded hover:bg-green-100" title="Neuen Mieter aus dieser Buchung anlegen">👤+</button>
+                            <button onclick="ImmoApp.banking.splitToDepositAndRent(${tx.id})" class="text-xs bg-gray-50 border border-gray-300 px-2 py-1 rounded hover:bg-gray-100" title="Zahlung in Kaution + Miete aufteilen">➗</button>
+                            <button onclick="ImmoApp.banking.deleteTx(${tx.id})" class="text-red-500 hover:bg-red-50 p-1 rounded" title="Buchung löschen">🗑️</button>
+                        </div>
+                    </div>
+                `;
+            }
         });
     }
 };

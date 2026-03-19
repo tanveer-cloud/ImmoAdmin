@@ -7,19 +7,19 @@ window.ImmoApp.tenants = {
         const container = document.getElementById("tenants-content");
         if (container.innerHTML.includes("Lade Module...")) {
             container.innerHTML = `
-                <div class="flex justify-between items-center mb-4 mt-2">
+                <div class="flex flex-col sm:flex-row justify-between sm:items-center mb-4 mt-2 gap-2">
                     <h3 class="text-lg font-bold text-gray-800">Verwaltete Objekte & WGs</h3>
-                    <button onclick="ImmoApp.tenants.showPropertyModal()" class="bg-blue-600 text-white px-3 py-1.5 rounded shadow hover:bg-blue-700 text-sm">+ Neues Objekt / WG</button>
+                    <button onclick="ImmoApp.tenants.showPropertyModal()" class="bg-blue-600 text-white px-4 py-2 rounded-lg shadow hover:bg-blue-700 text-sm w-full sm:w-auto">+ Neues Objekt / WG</button>
                 </div>
-                <div class="bg-white rounded-lg shadow-sm border border-gray-100 mb-8">
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 mb-8">
                     <ul id="properties-list" class="divide-y divide-gray-200"></ul>
                 </div>
 
-                <div class="flex justify-between items-center mb-4">
+                <div class="flex flex-col sm:flex-row justify-between sm:items-center mb-4 gap-2">
                     <h3 class="text-lg font-bold text-green-700">Aktuelle Mieter (<span class="year-label"></span>)</h3>
-                    <button onclick="ImmoApp.tenants.showTenantModal()" class="bg-blue-600 text-white px-3 py-1.5 rounded shadow hover:bg-blue-700 text-sm">+ Neuer Mieter</button>
+                    <button onclick="ImmoApp.tenants.showTenantModal()" class="bg-blue-600 text-white px-4 py-2 rounded-lg shadow hover:bg-blue-700 text-sm w-full sm:w-auto">+ Neuer Mieter</button>
                 </div>
-                <div class="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden overflow-x-auto mb-8">
+                <div class="hidden md:block bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden overflow-x-auto mb-8">
                     <table class="min-w-full divide-y divide-gray-200">
                         <thead class="bg-green-50">
                             <tr>
@@ -33,11 +33,12 @@ window.ImmoApp.tenants = {
                         <tbody id="tenants-table-body-active" class="bg-white divide-y divide-gray-200 text-sm"></tbody>
                     </table>
                 </div>
+                <div id="tenants-cards-active" class="md:hidden space-y-3 mb-8"></div>
 
                 <div class="flex justify-between items-center mb-4">
                     <h3 class="text-lg font-bold text-gray-500">Ausgezogene / Ehemalige Mieter</h3>
                 </div>
-                <div class="bg-gray-50 rounded-lg shadow-sm border border-gray-200 overflow-hidden overflow-x-auto opacity-75">
+                <div class="hidden md:block bg-gray-50 rounded-xl shadow-sm border border-gray-200 overflow-hidden overflow-x-auto opacity-75">
                     <table class="min-w-full divide-y divide-gray-200">
                         <thead class="bg-gray-200">
                             <tr>
@@ -51,6 +52,7 @@ window.ImmoApp.tenants = {
                         <tbody id="tenants-table-body-past" class="bg-gray-50 divide-y divide-gray-200 text-sm"></tbody>
                     </table>
                 </div>
+                <div id="tenants-cards-past" class="md:hidden space-y-3 opacity-85"></div>
 
                 <div id="modal-tenant-history" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50 overflow-y-auto">
                     <div class="bg-white p-6 rounded-lg shadow-lg w-full max-w-4xl my-8">
@@ -97,8 +99,8 @@ window.ImmoApp.tenants = {
                         </div>
                         
                         <div class="mt-6 flex justify-end gap-2">
-                            <button onclick="ImmoApp.tenants.openUtilitiesStatementForTenant()" class="px-4 py-2 bg-indigo-600 text-white rounded font-bold hover:bg-indigo-700 text-sm">🧾 NK-Abrechnung öffnen</button>
-                            <button onclick="ImmoApp.tenants.openLetterForTenant()" class="px-4 py-2 bg-blue-600 text-white rounded font-bold hover:bg-blue-700 text-sm">📄 Anschreiben öffnen</button>
+                            <button onclick="ImmoApp.tenants.openUtilitiesStatementForTenant()" class="px-4 py-2 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 text-sm">🧾 NK-Abrechnung öffnen</button>
+                            <button onclick="ImmoApp.tenants.openLetterForTenant()" class="px-4 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 text-sm">📄 Anschreiben öffnen</button>
                             <button onclick="document.getElementById('modal-tenant-history').classList.add('hidden')" class="px-6 py-2 bg-gray-800 text-white rounded font-bold hover:bg-gray-900">Schließen</button>
                         </div>
                     </div>
@@ -134,15 +136,14 @@ window.ImmoApp.tenants = {
         const senderBlock = (logoBlock || senderLines.length > 0)
             ? `<div class="letterhead">${logoBlock}${safeSenderLinesHtml}</div>`
             : '';
+        const today = new Date();
+        const dateStr = today.toLocaleDateString('de-DE');
         const placeStr = (sender.place || sender.city || '').trim();
         const placeDate = placeStr ? `${placeStr}, ${dateStr}` : dateStr;
         const footerText = (sender.footer || '').trim();
         const footerBlock = footerText
             ? `<div class="footer" id="letter-footer" contenteditable="true" style="outline:none;white-space:pre-line;">${footerText.replace(/</g,'&lt;')}</div>`
             : `<div class="footer" id="letter-footer" contenteditable="true" style="outline:none;white-space:pre-line;"></div>`;
-
-        const today = new Date();
-        const dateStr = today.toLocaleDateString('de-DE');
 
         const street = tenant.street || '';
         const zip = tenant.zip || '';
@@ -168,19 +169,20 @@ ${country}`.trim();
     <meta charset="UTF-8">
     <title>Schreiben an ${tenant.name}</title>
     <style>
-        body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 40px; }
-        .letter { max-width: 800px; margin: 0 auto; }
+        body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 40px; background:#f8fafc; color:#111827; }
+        .letter { max-width: 800px; margin: 0 auto; background:#fff; border:1px solid #e5e7eb; border-radius:12px; box-shadow:0 8px 24px rgba(15,23,42,0.06); padding:26px; }
         .letterhead { font-size: 12px; color: #374151; line-height: 1.4; margin-bottom: 8px; }
-        .header { display: flex; justify-content: space-between; font-size: 12px; color: #555; }
+        .header { display: flex; justify-content: space-between; font-size: 12px; color: #475569; align-items:center; gap:12px; }
         .address { margin-top: 40px; white-space: pre-line; }
-        .subject { margin-top: 30px; font-weight: bold; text-decoration: underline; }
+        .subject { margin-top: 30px; font-weight: 700; color:#111827; }
         .content { margin-top: 20px; line-height: 1.6; font-size: 14px; }
         .signature { margin-top: 40px; }
         .anlagen { margin-top: 24px; font-size: 12px; color: #6b7280; }
         .footer { margin-top: 28px; padding-top: 10px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #6b7280; }
         @media print {
             button { display: none; }
-            body { margin: 20mm; }
+            body { margin: 20mm; background:#fff; }
+            .letter { border:0; box-shadow:none; border-radius:0; padding:0; }
         }
     </style>
 </head>
@@ -198,7 +200,7 @@ ${addressBlock}
 
         <div class="subject">
             <div><strong>Betreff:</strong></div>
-            <div id="letter-subject" contenteditable="true" style="outline: none;">${subject}</div>
+            <div id="letter-subject" contenteditable="true" style="outline:none;border:1px dashed #c7d2fe;background:#eef2ff;border-radius:8px;padding:8px;font-size:12px;color:#312e81;">${subject}</div>
         </div>
 
         <div class="content">
@@ -225,10 +227,10 @@ __________________________
             </div>
         </div>
 
-        <button onclick="window.print()" style="margin-top:20px;padding:8px 16px;border-radius:4px;border:1px solid #ccc;background:#f3f4f6;cursor:pointer;">
+        <button onclick="window.print()" style="margin-top:20px;padding:9px 16px;border-radius:8px;border:1px solid #d1d5db;background:#f8fafc;color:#111827;font-weight:600;cursor:pointer;">
             Als PDF drucken / speichern
         </button>
-        <button onclick="(function(){ const s=(document.getElementById('letter-subject')?.innerText||'').trim(); const b=(document.getElementById('letter-content')?.innerText||'').trim(); const a=(document.getElementById('letter-attachments')?.innerText||'').trim(); const f=(document.getElementById('letter-footer')?.innerText||'').trim(); window.opener?.ImmoApp?.tenants?.downloadLetterDocx(${tenant.id}, s, b, a, f); })()" style="margin-top:10px;margin-left:10px;padding:8px 16px;border-radius:4px;border:1px solid #2563eb;background:#eff6ff;color:#1d4ed8;cursor:pointer;">
+        <button onclick="(function(){ const s=(document.getElementById('letter-subject')?.innerText||'').trim(); const b=(document.getElementById('letter-content')?.innerText||'').trim(); const a=(document.getElementById('letter-attachments')?.innerText||'').trim(); const f=(document.getElementById('letter-footer')?.innerText||'').trim(); window.opener?.ImmoApp?.tenants?.downloadLetterDocx(${tenant.id}, s, b, a, f); })()" style="margin-top:10px;margin-left:10px;padding:9px 16px;border-radius:8px;border:1px solid #2563eb;background:#eff6ff;color:#1d4ed8;font-weight:600;cursor:pointer;">
             Als DOCX herunterladen
         </button>
 
@@ -630,9 +632,9 @@ ${country}`.trim();
     <meta charset="UTF-8">
     <title>NK-Abrechnung ${periodLabel} – ${tenant.name}</title>
     <style>
-        body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 40px; }
-        .doc { max-width: 900px; margin: 0 auto; }
-        .header { display:flex; justify-content:space-between; font-size:12px; color:#555; }
+        body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 40px; background:#f8fafc; color:#111827; }
+        .doc { max-width: 900px; margin: 0 auto; background:#fff; border:1px solid #e5e7eb; border-radius:12px; box-shadow:0 8px 24px rgba(15,23,42,0.06); padding:26px; }
+        .header { display:flex; justify-content:space-between; font-size:12px; color:#475569; align-items:center; gap:12px; }
         .address { margin-top: 40px; white-space: pre-line; }
         .title { margin-top: 24px; font-weight: 800; font-size: 18px; }
         .meta { margin-top: 6px; font-size: 12px; color: #374151; }
@@ -645,7 +647,11 @@ ${country}`.trim();
         .letterhead { font-size: 12px; color: #374151; line-height: 1.4; margin-bottom: 8px; }
         .anlagen { margin-top: 14px; font-size: 12px; color: #6b7280; }
         .footer { margin-top: 18px; padding-top: 10px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #6b7280; }
-        @media print { button { display:none; } body { margin: 20mm; } }
+        @media print {
+            button { display:none; }
+            body { margin: 20mm; background:#fff; }
+            .doc { border:0; box-shadow:none; border-radius:0; padding:0; }
+        }
     </style>
 </head>
 <body>
@@ -736,10 +742,10 @@ Hinweistext (editierbar):
 - Rückfragen: __________
         </div>
 
-        <button onclick="window.print()" style="margin-top:18px;padding:8px 16px;border-radius:6px;border:1px solid #ccc;background:#f3f4f6;cursor:pointer;">
+        <button onclick="window.print()" style="margin-top:18px;padding:9px 16px;border-radius:8px;border:1px solid #d1d5db;background:#f8fafc;color:#111827;font-weight:600;cursor:pointer;">
             Als PDF drucken / speichern
         </button>
-        <button onclick="(function(){ const s=(document.getElementById('nk-subject')?.innerText||'').trim(); const n=(document.getElementById('nk-note')?.innerText||'').trim(); const a=(document.getElementById('nk-attachments')?.innerText||'').trim(); const f=(document.getElementById('nk-footer')?.innerText||'').trim(); window.opener?.ImmoApp?.tenants?.downloadUtilitiesDocx(${tenant.id}, s, n, a, f, ${JSON.stringify(nkStartISO)}, ${JSON.stringify(nkEndISO)}); })()" style="margin-top:18px;margin-left:10px;padding:8px 16px;border-radius:6px;border:1px solid #4f46e5;background:#eef2ff;color:#3730a3;cursor:pointer;">
+        <button onclick="(function(){ const s=(document.getElementById('nk-subject')?.innerText||'').trim(); const n=(document.getElementById('nk-note')?.innerText||'').trim(); const a=(document.getElementById('nk-attachments')?.innerText||'').trim(); const f=(document.getElementById('nk-footer')?.innerText||'').trim(); window.opener?.ImmoApp?.tenants?.downloadUtilitiesDocx(${tenant.id}, s, n, a, f, ${JSON.stringify(nkStartISO)}, ${JSON.stringify(nkEndISO)}); })()" style="margin-top:18px;margin-left:10px;padding:9px 16px;border-radius:8px;border:1px solid #4f46e5;background:#eef2ff;color:#3730a3;font-weight:600;cursor:pointer;">
             Als DOCX herunterladen
         </button>
 
@@ -1475,10 +1481,15 @@ Hinweistext (editierbar):
         
         const tbodyActive = document.getElementById("tenants-table-body-active");
         const tbodyPast = document.getElementById("tenants-table-body-past");
+        const cardsActive = document.getElementById("tenants-cards-active");
+        const cardsPast = document.getElementById("tenants-cards-past");
         tbodyActive.innerHTML = "";
         tbodyPast.innerHTML = "";
+        if (cardsActive) cardsActive.innerHTML = "";
+        if (cardsPast) cardsPast.innerHTML = "";
         
         let pastCount = 0;
+        let activeCount = 0;
 
         list.forEach(t => {
             const inDate = t.moveIn ? new Date(t.moveIn) : new Date('2000-01-01');
@@ -1515,6 +1526,7 @@ Hinweistext (editierbar):
             const nameLink = `<span class="font-medium text-blue-600 cursor-pointer hover:underline" onclick="ImmoApp.tenants.showHistoryModal(${t.id})" title="Klicken für gesamte Zahlungshistorie">${t.name}</span>`;
 
             if(isActive) {
+                activeCount++;
                 tbodyActive.innerHTML += `
                     <tr class="hover:bg-gray-100 border-b">
                         <td class="px-4 py-3 align-top whitespace-nowrap">
@@ -1536,6 +1548,32 @@ Hinweistext (editierbar):
                         </td>
                     </tr>
                 `;
+                if (cardsActive) {
+                    cardsActive.innerHTML += `
+                        <div class="bg-white border border-gray-100 rounded-xl shadow-sm p-3">
+                            <div class="flex justify-between items-start gap-3">
+                                <div>
+                                    <div class="text-xs font-bold text-gray-500">${propName} ${roomTxt}</div>
+                                    <div class="mt-1 text-sm font-semibold text-blue-700 cursor-pointer hover:underline" onclick="ImmoApp.tenants.showHistoryModal(${t.id})">${t.name}</div>
+                                    ${flatBadge}
+                                </div>
+                                <div class="text-right">
+                                    <div class="text-sm font-bold text-gray-800">${ImmoApp.ui.formatCurrency(t.rent)} mtl.</div>
+                                    <div class="text-[11px] text-gray-500">${moveInFormat} bis ${moveOutFormat}</div>
+                                </div>
+                            </div>
+                            <div class="mt-2 text-xs text-gray-600">
+                                Kalt: ${ImmoApp.ui.formatCurrency(base)} | NK: ${ImmoApp.ui.formatCurrency(prep)}<br>
+                                <span class="text-gray-500">${depTxt}</span>
+                            </div>
+                            <div class="mt-3 flex gap-2">
+                                <button onclick="ImmoApp.tenants.showHistoryModal(${t.id})" class="flex-1 text-purple-700 text-xs bg-purple-50 px-2 py-2 rounded-lg border border-purple-100">Historie</button>
+                                <button onclick="ImmoApp.tenants.showTenantModal(${t.id})" class="flex-1 text-blue-700 text-xs bg-blue-50 px-2 py-2 rounded-lg border border-blue-100">Bearbeiten</button>
+                                <button onclick="ImmoApp.tenants.deleteTenant(${t.id})" class="flex-1 text-red-700 text-xs bg-red-50 px-2 py-2 rounded-lg border border-red-100">Löschen</button>
+                            </div>
+                        </div>
+                    `;
+                }
             } else {
                 tbodyPast.innerHTML += `
                     <tr class="hover:bg-gray-100 border-b opacity-80">
@@ -1551,11 +1589,32 @@ Hinweistext (editierbar):
                         </td>
                     </tr>
                 `;
+                if (cardsPast) {
+                    cardsPast.innerHTML += `
+                        <div class="bg-gray-50 border border-gray-200 rounded-xl shadow-sm p-3">
+                            <div class="flex justify-between items-start gap-3">
+                                <div>
+                                    <div class="text-xs font-bold text-gray-500">${propName} ${roomTxt}</div>
+                                    <div class="mt-1 text-sm font-semibold text-blue-700 cursor-pointer hover:underline" onclick="ImmoApp.tenants.showHistoryModal(${t.id})">${t.name}</div>
+                                    <div class="text-[11px] text-gray-500 mt-1">${moveInFormat} bis ${moveOutFormat}</div>
+                                </div>
+                                <div class="text-right text-xs">${depBadge || '<span class="text-gray-400">Keine Kaution</span>'}</div>
+                            </div>
+                            <div class="mt-3 flex gap-2">
+                                <button onclick="ImmoApp.tenants.showHistoryModal(${t.id})" class="flex-1 text-purple-700 text-xs bg-purple-50 px-2 py-2 rounded-lg border border-purple-100">Historie</button>
+                                <button onclick="ImmoApp.tenants.showTenantModal(${t.id})" class="flex-1 text-blue-700 text-xs bg-blue-50 px-2 py-2 rounded-lg border border-blue-100">Bearbeiten</button>
+                                <button onclick="ImmoApp.tenants.deleteTenant(${t.id})" class="flex-1 text-red-700 text-xs bg-red-50 px-2 py-2 rounded-lg border border-red-100">Löschen</button>
+                            </div>
+                        </div>
+                    `;
+                }
                 pastCount++;
             }
         });
 
         if(pastCount === 0) tbodyPast.innerHTML = `<tr><td colspan="5" class="px-4 py-4 text-center text-gray-500 italic">Keine ausgezogenen Mieter vorhanden.</td></tr>`;
         if(tbodyActive.innerHTML === "") tbodyActive.innerHTML = `<tr><td colspan="5" class="px-4 py-4 text-center text-gray-500 italic">Keine aktiven Mieter in diesem Jahr.</td></tr>`;
+        if (cardsPast && pastCount === 0) cardsPast.innerHTML = `<div class="bg-gray-50 border border-gray-200 rounded-xl p-3 text-center text-gray-500 italic text-sm">Keine ausgezogenen Mieter vorhanden.</div>`;
+        if (cardsActive && activeCount === 0) cardsActive.innerHTML = `<div class="bg-white border border-gray-100 rounded-xl p-3 text-center text-gray-500 italic text-sm">Keine aktiven Mieter in diesem Jahr.</div>`;
     }
 };

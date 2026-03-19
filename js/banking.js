@@ -4,28 +4,29 @@ window.ImmoApp.banking = {
     tenantFilterId: null,
     tenantFilterName: null,
     sortByDateAsc: false,
+    outsideMenuClickHandlerBound: false,
     setupHTML: function() {
         const container = document.getElementById("banking-content");
         if (container.innerHTML.includes("Lade Module...")) {
             container.innerHTML = `
-                <div class="bg-blue-50 border border-blue-200 p-6 rounded-lg mb-6 flex flex-col md:flex-row justify-between items-center gap-4">
+                <div class="bg-blue-50 border border-blue-200 p-6 rounded-xl mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>
                         <h3 class="text-blue-800 font-bold mb-1">CSV-Import (Bank-Export)</h3>
                         <p class="text-sm text-blue-600">Lade hier die Umsätze aus deinem Online-Banking hoch.</p>
                     </div>
-                    <div class="flex gap-2">
+                    <div class="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
                         <input type="file" id="csv-upload" accept=".csv" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700 cursor-pointer">
-                        <button onclick="ImmoApp.banking.importCSV()" class="bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700 font-bold whitespace-nowrap">Importieren</button>
+                        <button onclick="ImmoApp.banking.importCSV()" class="bg-blue-600 text-white px-4 py-2 rounded-lg shadow hover:bg-blue-700 font-bold whitespace-nowrap w-full sm:w-auto">Importieren</button>
                     </div>
                 </div>
 
-                <div class="flex flex-col md:flex-row justify-between items-end mb-4 gap-4">
-                    <div class="flex gap-4 w-full md:w-2/3">
-                        <div class="w-1/2">
+                <div class="flex flex-col md:flex-row justify-between items-stretch md:items-end mb-4 gap-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full md:w-2/3">
+                        <div class="w-full">
                             <label class="block text-xs font-bold text-gray-500 mb-1">Suche (Name, Verwendungszweck)</label>
                             <input type="text" id="banking-text-filter" placeholder="Suchbegriff..." class="w-full border rounded p-2 text-sm" onkeyup="ImmoApp.banking.onSearchChange()">
                         </div>
-                        <div class="w-1/2">
+                        <div class="w-full">
                             <label class="block text-xs font-bold text-gray-500 mb-1">Status-Filter</label>
                             <select id="banking-status-filter" class="w-full border rounded p-2 text-sm" onchange="ImmoApp.banking.onStatusChange()">
                                 <option value="ALL">Alle anzeigen</option>
@@ -36,17 +37,17 @@ window.ImmoApp.banking = {
                             </select>
                         </div>
                     </div>
-                    <div class="flex flex-col items-end gap-2">
-                        <div class="flex gap-2">
-                            <button onclick="ImmoApp.banking.resetFilters()" class="border border-gray-300 text-gray-700 px-3 py-2 rounded shadow-sm hover:bg-gray-50 text-xs font-bold whitespace-nowrap">Filter zurücksetzen</button>
-                            <button onclick="ImmoApp.banking.runAutoMatch()" class="bg-indigo-600 text-white px-4 py-2 rounded shadow hover:bg-indigo-700 text-sm font-bold whitespace-nowrap">🤖 Auto-Match starten</button>
+                    <div class="flex flex-col items-stretch md:items-end gap-2">
+                        <div class="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                            <button onclick="ImmoApp.banking.resetFilters()" class="border border-gray-300 text-gray-700 px-3 py-2 rounded-lg shadow-sm hover:bg-gray-50 text-xs font-bold whitespace-nowrap w-full sm:w-auto">Filter zurücksetzen</button>
+                            <button onclick="ImmoApp.banking.runAutoMatch()" class="bg-indigo-600 text-white px-4 py-2 rounded-lg shadow hover:bg-indigo-700 text-sm font-bold whitespace-nowrap w-full sm:w-auto">🤖 Auto-Match starten</button>
                         </div>
                         <button onclick="ImmoApp.banking.deleteAllTxs()" class="text-red-500 hover:text-red-700 hover:underline text-xs font-bold mt-1">⚠️ Alle Buchungen löschen (Reset)</button>
                     </div>
                 </div>
 
                 <!-- Desktop/Tablet: Tabellenansicht -->
-                <div class="hidden md:block bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden overflow-x-auto">
+                <div class="hidden md:block bg-white rounded-xl shadow-sm border border-gray-100 overflow-x-auto">
                     <table class="min-w-full divide-y divide-gray-200 text-sm">
                         <thead class="bg-gray-50">
                             <tr>
@@ -64,6 +65,17 @@ window.ImmoApp.banking = {
                 <!-- Mobile: Kartenansicht -->
                 <div id="banking-cards" class="md:hidden space-y-3"></div>
             `;
+
+            if (!this.outsideMenuClickHandlerBound) {
+                document.addEventListener('click', (event) => {
+                    const target = event.target;
+                    const clickInsideMenu = target && target.closest && target.closest('[id^="tx-actions-menu-"]');
+                    const clickOnToggle = target && target.closest && target.closest('.tx-actions-toggle');
+                    if (clickInsideMenu || clickOnToggle) return;
+                    document.querySelectorAll('[id^="tx-actions-menu-"]').forEach(m => m.classList.add('hidden'));
+                });
+                this.outsideMenuClickHandlerBound = true;
+            }
         }
     },
 
@@ -375,6 +387,15 @@ window.ImmoApp.banking = {
         if (window.ImmoApp.dashboard) ImmoApp.dashboard.render();
     },
 
+    toggleTxActionsMenu: function(txId) {
+        const menuId = `tx-actions-menu-${txId}`;
+        const menu = document.getElementById(menuId);
+        if (!menu) return;
+        const willOpen = menu.classList.contains('hidden');
+        document.querySelectorAll('[id^="tx-actions-menu-"]').forEach(m => m.classList.add('hidden'));
+        if (willOpen) menu.classList.remove('hidden');
+    },
+
     createTenantFromTx: async function(txId) {
         const db = ImmoApp.db.instance;
         const tx = await db.transactions.get(txId);
@@ -523,6 +544,16 @@ window.ImmoApp.banking = {
                 : `<span class="text-[10px] bg-green-100 text-green-800 px-1 py-0.5 rounded mr-1 border border-green-200 uppercase font-bold tracking-wide">Sender:</span>`;
 
             const isManual = tx.importBatchId === 'manual' || tx.importBatchId === 'manual_history';
+            const actionsMenuHtml = `
+                <div class="relative inline-block text-left">
+                    <button onclick="ImmoApp.banking.toggleTxActionsMenu(${tx.id})" class="tx-actions-toggle text-xs bg-gray-50 border border-gray-300 px-2 py-1 rounded-lg hover:bg-gray-100" title="Aktionen">⋯</button>
+                    <div id="tx-actions-menu-${tx.id}" class="hidden absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-20">
+                        <button onclick="ImmoApp.banking.createTenantFromTx(${tx.id}); document.getElementById('tx-actions-menu-${tx.id}')?.classList.add('hidden');" class="block w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50">👤 Mieter anlegen</button>
+                        <button onclick="ImmoApp.banking.splitToDepositAndRent(${tx.id}); document.getElementById('tx-actions-menu-${tx.id}')?.classList.add('hidden');" class="block w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50">➗ In Kaution + Miete splitten</button>
+                        <button onclick="ImmoApp.banking.deleteTx(${tx.id}); document.getElementById('tx-actions-menu-${tx.id}')?.classList.add('hidden');" class="block w-full text-left px-3 py-2 text-xs text-red-700 hover:bg-red-50">🗑️ Löschen</button>
+                    </div>
+                </div>
+            `;
 
             if (tbody) {
                 tbody.innerHTML += `
@@ -541,10 +572,8 @@ window.ImmoApp.banking = {
                         </td>
                         <td class="px-4 py-3 align-top text-right font-bold ${amountColor} whitespace-nowrap">${ImmoApp.ui.formatCurrency(tx.amount)}</td>
                         <td class="px-4 py-3 align-top">${selectHtml}</td>
-                        <td class="px-4 py-3 align-top text-right space-x-1">
-                            <button onclick="ImmoApp.banking.createTenantFromTx(${tx.id})" class="text-xs bg-green-50 border border-green-300 px-2 py-1 rounded hover:bg-green-100" title="Neuen Mieter aus dieser Buchung anlegen">👤+</button>
-                            <button onclick="ImmoApp.banking.splitToDepositAndRent(${tx.id})" class="text-xs bg-gray-50 border border-gray-300 px-2 py-1 rounded hover:bg-gray-100" title="Zahlung in Kaution + Miete aufteilen">➗</button>
-                            <button onclick="ImmoApp.banking.deleteTx(${tx.id})" class="text-red-500 hover:bg-red-50 p-1 rounded" title="Buchung löschen">🗑️</button>
+                        <td class="px-4 py-3 align-top text-right">
+                            ${actionsMenuHtml}
                         </td>
                     </tr>
                 `;
@@ -571,10 +600,8 @@ window.ImmoApp.banking = {
                         <div class="mb-2">
                             ${selectHtml}
                         </div>
-                        <div class="flex justify-end gap-2">
-                            <button onclick="ImmoApp.banking.createTenantFromTx(${tx.id})" class="text-xs bg-green-50 border border-green-300 px-2 py-1 rounded hover:bg-green-100" title="Neuen Mieter aus dieser Buchung anlegen">👤+</button>
-                            <button onclick="ImmoApp.banking.splitToDepositAndRent(${tx.id})" class="text-xs bg-gray-50 border border-gray-300 px-2 py-1 rounded hover:bg-gray-100" title="Zahlung in Kaution + Miete aufteilen">➗</button>
-                            <button onclick="ImmoApp.banking.deleteTx(${tx.id})" class="text-red-500 hover:bg-red-50 p-1 rounded" title="Buchung löschen">🗑️</button>
+                        <div class="flex justify-end">
+                            ${actionsMenuHtml}
                         </div>
                     </div>
                 `;

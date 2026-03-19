@@ -5,7 +5,7 @@ window.ImmoApp.utilities = {
         const container = document.getElementById("utilities-content");
         if (container.innerHTML.includes("Lade Module...")) {
             container.innerHTML = `
-                <div class="flex border-b mb-6">
+                <div class="flex border-b border-gray-200 mb-6">
                     <button id="tab-util-costs" class="px-6 py-3 font-bold text-blue-600 border-b-2 border-blue-600" onclick="ImmoApp.utilities.switchTab('costs')">1. Kosten erfassen & WG-Check</button>
                     <button id="tab-util-export" class="px-6 py-3 font-bold text-gray-500 hover:text-blue-600" onclick="ImmoApp.utilities.switchTab('export')">2. Abrechnungen generieren</button>
                 </div>
@@ -22,7 +22,7 @@ window.ImmoApp.utilities = {
                         </div>
 
                         <!-- Manuelle Rechnung erfassen -->
-                        <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-4">
+                    <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-4">
                             <h3 class="text-sm font-bold text-gray-700 mb-2">+ Manuelle Nebenkosten-Rechnung erfassen</h3>
                             <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
                                 <div>
@@ -38,7 +38,7 @@ window.ImmoApp.utilities = {
                                     <input type="number" step="0.01" id="util-man-amount" class="w-full border rounded p-2 text-xs" placeholder="z.B. 1200">
                                 </div>
                                 <div class="flex gap-2">
-                                    <button onclick="ImmoApp.utilities.addManualUtility()" class="w-full md:w-auto bg-blue-600 text-white px-4 py-2 rounded text-xs font-bold shadow hover:bg-blue-700 whitespace-nowrap">
+                                    <button onclick="ImmoApp.utilities.addManualUtility()" class="w-full md:w-auto bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold shadow hover:bg-blue-700 whitespace-nowrap">
                                         💾 Rechnung hinzufügen
                                     </button>
                                 </div>
@@ -66,11 +66,11 @@ window.ImmoApp.utilities = {
                                 <p class="text-3xl font-bold" id="wg-check-result">0,00 €</p>
                                 <p class="text-xs text-gray-500 mt-1" id="wg-check-result-text">Rechnen deine Pauschalen sich?</p>
                             </div>
-                            <button onclick="document.getElementById('modal-wg-check').classList.remove('hidden')" class="mt-4 text-xs bg-gray-100 border border-gray-300 px-3 py-2 rounded hover:bg-gray-200 text-gray-700 font-bold w-full transition-colors">🔍 Aufschlüsselung anzeigen</button>
+                            <button onclick="document.getElementById('modal-wg-check').classList.remove('hidden')" class="mt-4 text-xs bg-gray-100 border border-gray-300 px-3 py-2 rounded-lg hover:bg-gray-200 text-gray-700 font-bold w-full transition-colors">🔍 Aufschlüsselung anzeigen</button>
                         </div>
                     </div>
 
-                    <div class="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden overflow-x-auto">
+                    <div class="hidden md:block bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden overflow-x-auto">
                         <table class="min-w-full divide-y divide-gray-200 text-sm">
                             <thead class="bg-gray-50">
                                 <tr>
@@ -83,26 +83,27 @@ window.ImmoApp.utilities = {
                             <tbody id="utilities-table-body" class="bg-white divide-y divide-gray-200"></tbody>
                         </table>
                     </div>
+                    <div id="utilities-cards" class="md:hidden space-y-3"></div>
                 </div>
 
                 <div id="util-view-export" class="hidden">
-                    <div class="bg-blue-50 border border-blue-200 p-6 rounded-lg mb-6">
+                    <div class="bg-blue-50 border border-blue-200 p-6 rounded-xl mb-6">
                         <h2 class="text-xl font-bold text-blue-800 mb-4">1-Klick Abrechnungs-Generator</h2>
                         <div class="flex flex-col md:flex-row gap-4 items-end">
-                            <div class="w-1/3">
+                            <div class="w-full md:w-1/3">
                                 <label class="block text-sm font-bold mb-1 text-blue-800">1. Objekt wählen</label>
                                 <select id="export-prop-select" class="w-full border rounded p-2" onchange="ImmoApp.utilities.loadTenantsForExport()">
                                     <option value="">-- Bitte wählen --</option>
                                 </select>
                             </div>
-                            <div class="w-1/3">
+                            <div class="w-full md:w-1/3">
                                 <label class="block text-sm font-bold mb-1 text-blue-800">2. Mieter wählen</label>
                                 <select id="export-tenant-select" class="w-full border rounded p-2 disabled:bg-gray-100" disabled>
                                     <option value="">-- Zuerst Objekt wählen --</option>
                                 </select>
                             </div>
-                            <div class="w-1/3">
-                                <button onclick="ImmoApp.utilities.generateStatementPreview()" class="w-full bg-blue-600 text-white font-bold py-2 rounded shadow hover:bg-blue-700">📄 Vorschau generieren</button>
+                            <div class="w-full md:w-1/3">
+                                <button onclick="ImmoApp.utilities.generateStatementPreview()" class="w-full bg-blue-600 text-white font-bold py-2 rounded-lg shadow hover:bg-blue-700">📄 Vorschau generieren</button>
                             </div>
                         </div>
                         <div class="mt-4 flex flex-col md:flex-row gap-4 items-end">
@@ -116,10 +117,10 @@ window.ImmoApp.utilities = {
                             </div>
                         </div>
                         <div class="mt-4 flex flex-col md:flex-row gap-3">
-                            <button onclick="ImmoApp.utilities.bulkDownloadNkDocxForProperty()" class="w-full md:w-auto bg-indigo-600 text-white font-bold py-2 px-4 rounded shadow hover:bg-indigo-700">
+                            <button onclick="ImmoApp.utilities.bulkDownloadNkDocxForProperty()" class="w-full md:w-auto bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg shadow hover:bg-indigo-700">
                                 🧾 NK-Abrechnungen (DOCX) für alle Mieter dieses Objekts
                             </button>
-                            <button onclick="ImmoApp.utilities.bulkDownloadLettersDocxForProperty()" class="w-full md:w-auto bg-blue-600 text-white font-bold py-2 px-4 rounded shadow hover:bg-blue-700">
+                            <button onclick="ImmoApp.utilities.bulkDownloadLettersDocxForProperty()" class="w-full md:w-auto bg-blue-600 text-white font-bold py-2 px-4 rounded-lg shadow hover:bg-blue-700">
                                 📄 Anschreiben (DOCX) für alle Mieter dieses Objekts
                             </button>
                             <p class="text-xs text-blue-700 md:pt-2">
@@ -129,11 +130,11 @@ window.ImmoApp.utilities = {
                     </div>
 
                     <div id="statement-preview-container" class="hidden">
-                        <div class="flex justify-end gap-2 mb-4">
-                            <button onclick="ImmoApp.utilities.downloadWord()" class="bg-indigo-600 text-white px-4 py-2 rounded font-bold shadow hover:bg-indigo-700">💾 Als Word (.doc)</button>
-                            <button onclick="ImmoApp.utilities.downloadPDF()" class="bg-red-600 text-white px-4 py-2 rounded font-bold shadow hover:bg-red-700">🖨️ Als PDF</button>
+                        <div class="flex flex-col sm:flex-row justify-end gap-2 mb-4">
+                            <button onclick="ImmoApp.utilities.downloadWord()" class="w-full sm:w-auto bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold shadow hover:bg-indigo-700">💾 Als Word (.doc)</button>
+                            <button onclick="ImmoApp.utilities.downloadPDF()" class="w-full sm:w-auto bg-red-600 text-white px-4 py-2 rounded-lg font-bold shadow hover:bg-red-700">🖨️ Als PDF</button>
                         </div>
-                        <div id="statement-doc" class="bg-white border p-12 shadow-lg mx-auto" style="max-w: 800px; color: black; font-family: Arial, sans-serif; line-height: 1.5;"></div>
+                        <div id="statement-doc" class="bg-white border border-gray-200 rounded-xl p-12 shadow-lg mx-auto" style="max-width: 840px; color: #111827; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.55;"></div>
                     </div>
                 </div>
 
@@ -432,10 +433,13 @@ window.ImmoApp.utilities = {
 
 
         const tbody = document.getElementById("utilities-table-body");
+        const cards = document.getElementById("utilities-cards");
         tbody.innerHTML = "";
+        if (cards) cards.innerHTML = "";
         
         if (utils.length === 0) {
             tbody.innerHTML = `<tr><td colspan="4" class="px-4 py-8 text-center text-gray-500 italic">Keine Nebenkosten-Buchungen gefunden.</td></tr>`;
+            if (cards) cards.innerHTML = `<div class="bg-white border border-gray-100 rounded-xl p-4 text-center text-gray-500 italic text-sm">Keine Nebenkosten-Buchungen gefunden.</div>`;
             return;
         }
 
@@ -494,6 +498,40 @@ window.ImmoApp.utilities = {
                     </td>
                 </tr>
             `;
+
+            if (cards) {
+                cards.innerHTML += `
+                    <div class="bg-white border border-gray-100 rounded-xl shadow-sm p-3">
+                        <div class="flex justify-between items-start gap-3">
+                            <div class="min-w-0">
+                                <div class="font-bold text-gray-800 break-words">${u.name.split(' - ')[0]}</div>
+                                <div class="text-xs text-gray-500 mt-0.5 break-words">${u.name.split(' - ')[1] || ''}</div>
+                            </div>
+                            <div class="text-sm font-bold text-gray-800 whitespace-nowrap">${ImmoApp.ui.formatCurrency(u.amount)}</div>
+                        </div>
+                        <div class="mt-3">
+                            <label class="block text-[11px] font-bold text-gray-500 mb-1">Objekt-Zuweisung</label>
+                            <select onchange="ImmoApp.utilities.updateUtil(${u.id}, 'propertyId', this.value)" class="border rounded p-2 text-xs w-full ${propColor}">
+                                ${propOpts}
+                            </select>
+                        </div>
+                        <div class="mt-3 grid grid-cols-1 gap-2">
+                            <div>
+                                <label class="block text-[11px] font-bold text-gray-500 mb-1">Kategorie</label>
+                                <select onchange="ImmoApp.utilities.updateUtil(${u.id}, 'category', this.value)" class="border rounded p-2 text-xs w-full ${catColor}">
+                                    ${catOpts}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-bold text-gray-500 mb-1">Schlüssel</label>
+                                <select onchange="ImmoApp.utilities.updateUtil(${u.id}, 'splitKey', this.value)" class="border rounded p-2 text-xs w-full ${catColor}">
+                                    ${keyOpts}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
         });
     },
 

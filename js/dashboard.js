@@ -27,8 +27,8 @@ window.ImmoApp.dashboard = {
         if (container.innerHTML.includes("Lade Module...")) {
             container.innerHTML = `
                 <div id="dash-alerts-container" class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 hidden">
-                    <div class="bg-orange-50 p-6 rounded-lg shadow-sm border border-orange-200">
-                        <h3 class="text-orange-800 text-sm font-bold mb-2 uppercase flex items-center gap-2"><span>💰</span> Ausstehende Kautionen</h3>
+                    <div class="bg-amber-50 p-6 rounded-lg shadow-sm border border-amber-200">
+                        <h3 class="text-amber-800 text-sm font-bold mb-2 uppercase flex items-center gap-2"><span>💰</span> Ausstehende Kautionen</h3>
                         <ul id="dash-deposit-alerts" class="space-y-2 text-sm"></ul>
                     </div>
                     <div class="bg-red-50 p-6 rounded-lg shadow-sm border border-red-200">
@@ -38,17 +38,20 @@ window.ImmoApp.dashboard = {
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                    <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
-                        <h3 class="text-gray-500 text-sm font-semibold mb-1">Gesamt-Mieteinnahmen (Soll)</h3>
+                    <div class="bg-green-50 p-6 rounded-lg shadow-sm border border-green-100 border-t-[3px] border-t-green-500">
+                        <h3 class="text-gray-600 text-sm font-semibold mb-1">Soll-Miete</h3>
                         <p class="text-3xl font-bold text-green-600" id="dash-expected-rent">0,00 €</p>
+                        <p class="text-xs text-green-700 mt-1" id="dash-expected-sub">0 aktive Mieter</p>
                     </div>
-                    <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
-                        <h3 class="text-gray-500 text-sm font-semibold mb-1">Ist-Einnahmen (Jahr)</h3>
+                    <div class="bg-blue-50 p-6 rounded-lg shadow-sm border border-blue-100 border-t-[3px] border-t-blue-500">
+                        <h3 class="text-gray-600 text-sm font-semibold mb-1">Ist-Einnahmen</h3>
                         <p class="text-3xl font-bold text-blue-600" id="dash-actual-rent">0,00 €</p>
+                        <p class="text-xs text-blue-700 mt-1" id="dash-actual-sub">0 % erreicht</p>
                     </div>
-                    <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
-                        <h3 class="text-gray-500 text-sm font-semibold mb-1">Ausstehend</h3>
+                    <div class="bg-red-50 p-6 rounded-lg shadow-sm border border-red-100 border-t-[3px] border-t-red-500">
+                        <h3 class="text-gray-600 text-sm font-semibold mb-1">Ausstehend</h3>
                         <p class="text-3xl font-bold text-red-500" id="dash-missing-rent">0,00 €</p>
+                        <p class="text-xs text-red-700 mt-1" id="dash-missing-sub">0 Mieter im Rückstand</p>
                     </div>
                 </div>
                 
@@ -203,12 +206,12 @@ window.ImmoApp.dashboard = {
                     const depositLink = `<button onclick="ImmoApp.dashboard.jumpToBanking('${t.name}')" class="text-blue-600 hover:underline font-bold" title="Klicken, um im Kontoauszug nach der Rückzahlung zu suchen">${ImmoApp.ui.formatCurrency(t.deposit)} 🔍</button>`;
                     
                     depositList.innerHTML += `
-                        <li class="flex justify-between items-center bg-white p-2 rounded shadow-sm border border-orange-100">
+                        <li class="flex justify-between items-center bg-white p-2 rounded shadow-sm border border-amber-100">
                             <div>
-                                <strong class="text-orange-900 block cursor-pointer hover:underline" onclick="ImmoApp.dashboard.editTenantDirectly(${t.id})">${t.name}</strong>
-                                <span class="text-xs text-orange-700">Auszug: ${outDate.toLocaleDateString('de-DE')} | Kaution: ${depositLink}</span>
+                                <strong class="text-amber-900 block cursor-pointer hover:underline" onclick="ImmoApp.dashboard.editTenantDirectly(${t.id})">${t.name}</strong>
+                                <span class="text-xs text-amber-700">Auszug: ${outDate.toLocaleDateString('de-DE')} | Kaution: ${depositLink}</span>
                             </div>
-                            <button onclick="ImmoApp.dashboard.markDepositPaid(${t.id})" class="text-xs bg-orange-100 hover:bg-orange-200 text-orange-800 px-2 py-1 rounded font-bold">Als Erledigt markieren</button>
+                            <button onclick="ImmoApp.dashboard.markDepositPaid(${t.id})" class="text-xs bg-amber-100 hover:bg-amber-200 text-amber-800 px-2 py-1 rounded font-bold">Als Erledigt markieren</button>
                         </li>
                     `;
                 }
@@ -315,7 +318,8 @@ window.ImmoApp.dashboard = {
 
         document.getElementById("dash-expected-rent").innerText = ImmoApp.ui.formatCurrency(expectedYearly);
         document.getElementById("dash-actual-rent").innerText = ImmoApp.ui.formatCurrency(actualRent);
-        document.getElementById("dash-missing-rent").innerText = ImmoApp.ui.formatCurrency(expectedYearly - actualRent);
+        const totalMissing = expectedYearly - actualRent;
+        document.getElementById("dash-missing-rent").innerText = ImmoApp.ui.formatCurrency(totalMissing);
 
         const statusList = document.getElementById("dash-status-list");
         const bilanzBody = document.getElementById("dash-bilanz-body");
@@ -327,6 +331,13 @@ window.ImmoApp.dashboard = {
         }
 
         const bilanz = [];
+        let arrearsCount = 0;
+        const getInitials = (name) => {
+            const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+            if (parts.length === 0) return '??';
+            if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+            return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+        };
 
         for (let tenant of activeTenants) {
             const expectedForTenant = tenant._yearlyExpected != null ? tenant._yearlyExpected : (tenant.rent * tenant.activeMonths);
@@ -345,43 +356,71 @@ window.ImmoApp.dashboard = {
             bilanz.push({ tenant, expected: expectedForTenant, paid, diff: diffTenant });
 
             if (expectedForTenant > 0 && paid < (expectedForTenant - (tenant.rent * 0.5))) {
+                arrearsCount++;
+                const initials = getInitials(tenant.name);
                 statusList.innerHTML += `
                     <li class="p-3 bg-red-50 border border-red-200 rounded cursor-pointer hover:bg-red-100 transition shadow-sm" onclick="ImmoApp.dashboard.showMonthlyDetails(${tenant.id})">
-                        <div class="flex justify-between items-center">
-                            <strong class="text-red-700 hover:underline hover:text-blue-800" onclick="event.stopPropagation(); ImmoApp.dashboard.editTenantDirectly(${tenant.id});" title="Mieter direkt bearbeiten">${tenant.name} ${pInfo}</strong>
-                            <span class="text-xs bg-red-600 text-white px-2 py-1 rounded-full">Prüfen ➔</span>
-                        </div>
-                        <div class="mt-1 text-gray-700">
-                            Soll: ${ImmoApp.ui.formatCurrency(expectedForTenant)} | Ist: <span class="font-bold text-red-600">${ImmoApp.ui.formatCurrency(paid)}</span>
-                            <span class="text-xs text-red-600 block mt-1">Es fehlen ${ImmoApp.ui.formatCurrency(expectedForTenant - paid)}. Klicke für Details.</span>
+                        <div class="flex justify-between items-start gap-3">
+                            <div class="flex items-start gap-3 min-w-0">
+                                <div class="w-9 h-9 rounded-full bg-red-200 text-red-800 flex items-center justify-center text-xs font-bold shrink-0">${initials}</div>
+                                <div class="min-w-0">
+                                    <strong class="text-red-700 text-base leading-tight hover:underline hover:text-blue-800" onclick="event.stopPropagation(); ImmoApp.dashboard.editTenantDirectly(${tenant.id});" title="Mieter direkt bearbeiten">${tenant.name} ${pInfo}</strong>
+                                    <div class="mt-1 text-sm text-gray-600">
+                                        Soll: ${ImmoApp.ui.formatCurrency(expectedForTenant)} | Ist: <span class="font-bold text-red-600">${ImmoApp.ui.formatCurrency(paid)}</span>
+                                    </div>
+                                    <span class="text-xs text-red-600 block mt-1">Es fehlen ${ImmoApp.ui.formatCurrency(expectedForTenant - paid)}. Klicke für Details.</span>
+                                </div>
+                            </div>
+                            <span class="text-xs bg-red-600 text-white px-3 py-1 rounded-full self-center whitespace-nowrap">Prüfen ➔</span>
                         </div>
                     </li>`;
             } else if (diffTenant > (tenant.rent * 0.1)) {
+                const initials = getInitials(tenant.name);
                 statusList.innerHTML += `
                     <li class="p-3 bg-blue-50 border border-blue-200 rounded cursor-pointer hover:bg-blue-100 transition shadow-sm" onclick="ImmoApp.dashboard.showMonthlyDetails(${tenant.id})">
-                        <div class="flex justify-between items-center">
-                            <strong class="text-blue-800 hover:underline hover:text-blue-900" onclick="event.stopPropagation(); ImmoApp.dashboard.editTenantDirectly(${tenant.id});" title="Mieter direkt bearbeiten">${tenant.name} ${pInfo}</strong>
-                            <span class="text-xs bg-blue-600 text-white px-2 py-1 rounded-full">Guthaben ➔</span>
-                        </div>
-                        <div class="mt-1 text-gray-700">
-                            Soll: ${ImmoApp.ui.formatCurrency(expectedForTenant)} | Ist: <span class="font-bold text-blue-600">${ImmoApp.ui.formatCurrency(paid)}</span>
-                            <span class="text-xs text-blue-600 block mt-1">Guthaben von ${ImmoApp.ui.formatCurrency(diffTenant)} (zu viel / zu früh bezahlt).</span>
+                        <div class="flex justify-between items-start gap-3">
+                            <div class="flex items-start gap-3 min-w-0">
+                                <div class="w-9 h-9 rounded-full bg-blue-200 text-blue-800 flex items-center justify-center text-xs font-bold shrink-0">${initials}</div>
+                                <div class="min-w-0">
+                                    <strong class="text-blue-800 text-base leading-tight hover:underline hover:text-blue-900" onclick="event.stopPropagation(); ImmoApp.dashboard.editTenantDirectly(${tenant.id});" title="Mieter direkt bearbeiten">${tenant.name} ${pInfo}</strong>
+                                    <div class="mt-1 text-sm text-gray-600">
+                                        Soll: ${ImmoApp.ui.formatCurrency(expectedForTenant)} | Ist: <span class="font-bold text-blue-600">${ImmoApp.ui.formatCurrency(paid)}</span>
+                                    </div>
+                                    <span class="text-xs text-blue-600 block mt-1">Guthaben von ${ImmoApp.ui.formatCurrency(diffTenant)} (zu viel / zu früh bezahlt).</span>
+                                </div>
+                            </div>
+                            <span class="text-xs bg-blue-600 text-white px-3 py-1 rounded-full self-center whitespace-nowrap">Guthaben ➔</span>
                         </div>
                     </li>`;
             } else {
+                const initials = getInitials(tenant.name);
                 statusList.innerHTML += `
                     <li class="p-3 bg-green-50 border border-green-200 rounded cursor-pointer hover:bg-green-100 transition shadow-sm" onclick="ImmoApp.dashboard.showMonthlyDetails(${tenant.id})">
-                        <div class="flex justify-between items-center">
-                            <strong class="text-green-800 hover:underline hover:text-blue-800" onclick="event.stopPropagation(); ImmoApp.dashboard.editTenantDirectly(${tenant.id});" title="Mieter direkt bearbeiten">${tenant.name} ${pInfo}</strong>
-                            <span class="text-xs bg-green-600 text-white px-2 py-1 rounded-full">Details ➔</span>
-                        </div>
-                        <div class="mt-1 text-gray-700">
-                            Soll: ${ImmoApp.ui.formatCurrency(expectedForTenant)} | Ist: <span class="font-bold text-green-600">${ImmoApp.ui.formatCurrency(paid)}</span>
-                            <span class="text-xs text-green-600 font-bold block mt-1">✅ Ausgeglichen.</span>
+                        <div class="flex justify-between items-start gap-3">
+                            <div class="flex items-start gap-3 min-w-0">
+                                <div class="w-9 h-9 rounded-full bg-green-200 text-green-800 flex items-center justify-center text-xs font-bold shrink-0">${initials}</div>
+                                <div class="min-w-0">
+                                    <strong class="text-green-800 text-base leading-tight hover:underline hover:text-blue-800" onclick="event.stopPropagation(); ImmoApp.dashboard.editTenantDirectly(${tenant.id});" title="Mieter direkt bearbeiten">${tenant.name} ${pInfo}</strong>
+                                    <div class="mt-1 text-sm text-gray-600">
+                                        Soll: ${ImmoApp.ui.formatCurrency(expectedForTenant)} | Ist: <span class="font-bold text-green-600">${ImmoApp.ui.formatCurrency(paid)}</span>
+                                    </div>
+                                    <span class="text-xs text-green-600 font-bold block mt-1">✅ Ausgeglichen.</span>
+                                </div>
+                            </div>
+                            <span class="text-xs bg-green-600 text-white px-3 py-1 rounded-full self-center whitespace-nowrap">Details ➔</span>
                         </div>
                     </li>`;
             }
         }
+
+        const reachedPctRaw = expectedYearly > 0 ? (actualRent / expectedYearly) * 100 : 100;
+        const reachedPct = Math.max(0, Math.min(999, reachedPctRaw));
+        const expectedSub = document.getElementById("dash-expected-sub");
+        const actualSub = document.getElementById("dash-actual-sub");
+        const missingSub = document.getElementById("dash-missing-sub");
+        if (expectedSub) expectedSub.innerText = `${activeTenants.length} aktive Mieter`;
+        if (actualSub) actualSub.innerText = `${reachedPct.toFixed(0).replace('.', ',')} % erreicht`;
+        if (missingSub) missingSub.innerText = `${arrearsCount} Mieter im Rückstand`;
 
         if (bilanzBody) {
             bilanz.sort((a, b) => b.diff - a.diff);

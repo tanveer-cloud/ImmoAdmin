@@ -6,21 +6,14 @@ window.ImmoApp.ui = {
     activeTab: 'dashboard',
 
     init: function() {
-        // Das Jahr Dropdown suchen
-        const yearSelect = document.getElementById('global-year-select');
-        if(yearSelect) {
-            // 2. Das Dropdown-Feld optisch auf unser geladenes/aktuelles Jahr setzen
-            yearSelect.value = this.currentYear;
-            
-            yearSelect.addEventListener('change', (e) => {
-                this.currentYear = e.target.value;
-                
-                // 3. Wenn der Nutzer das Jahr wechselt -> sofort im Browser speichern!
-                localStorage.setItem("immo_app_year", this.currentYear);
-                
-                this.updateYearLabels();
-                this.refreshCurrentTab();
-            });
+        // Jahres-Toggle (← Jahr →)
+        const yearPrevBtn = document.getElementById('year-prev-btn');
+        const yearNextBtn = document.getElementById('year-next-btn');
+        if (yearPrevBtn) {
+            yearPrevBtn.addEventListener('click', () => this.changeYearBy(-1));
+        }
+        if (yearNextBtn) {
+            yearNextBtn.addEventListener('click', () => this.changeYearBy(1));
         }
         
         this.updateYearLabels();
@@ -45,6 +38,17 @@ window.ImmoApp.ui = {
         document.querySelectorAll('.year-label').forEach(el => {
             el.innerText = this.currentYear;
         });
+        const globalYearDisplay = document.getElementById('global-year-display');
+        if (globalYearDisplay) globalYearDisplay.innerText = this.currentYear;
+    },
+
+    changeYearBy: function(delta) {
+        const current = parseInt(this.currentYear, 10);
+        const safeCurrent = Number.isFinite(current) ? current : new Date().getFullYear();
+        this.currentYear = String(safeCurrent + delta);
+        localStorage.setItem("immo_app_year", this.currentYear);
+        this.updateYearLabels();
+        this.refreshCurrentTab();
     },
 
     refreshCurrentTab: function() {
@@ -68,10 +72,9 @@ window.ImmoApp.ui = {
             targetView.classList.add('active');
         }
 
-        // 3. Tab-Button optisch hervorheben (optional, macht das Menü schöner)
+        // 3. Tab-Button optisch hervorheben (Desktop + Mobile)
         document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('tab-active'));
-        const activeBtn = document.getElementById('nav-' + tabId);
-        if(activeBtn) activeBtn.classList.add('tab-active');
+        document.querySelectorAll(`.nav-btn[data-tab="${tabId}"]`).forEach(btn => btn.classList.add('tab-active'));
 
         // 4. Modul laden und zeichnen
         if (window.ImmoApp[tabId] && typeof window.ImmoApp[tabId].render === 'function') {

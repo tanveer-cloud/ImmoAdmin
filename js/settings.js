@@ -34,9 +34,13 @@ window.ImmoApp.settings = {
                                     <label class="block text-sm font-medium text-gray-700 mb-1">Drive-Ordner (optional)</label>
                                     <input type="text" id="google-drive-folder" class="w-full border rounded p-2 text-xs bg-gray-50" placeholder="z.B. ImmoAdmin-Daten">
                                     <p class="text-[11px] text-gray-400 mt-1">
-                                        Hinweis: Dient nur als Merktext. Die eigentliche Ordner-Verknüpfung wird in einem späteren Schritt umgesetzt.
+                                        Optionaler Zielordner für Dokumente/Backups. Wenn leer, speichert die App im Standardbereich von Drive.
                                     </p>
                                 </div>
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" id="doc-auto-upload" class="w-4 h-4 text-indigo-600 rounded">
+                                    <span class="text-sm text-gray-700">Dokumente (DOCX) nach Erstellung automatisch zu Drive hochladen</span>
+                                </label>
                             </div>
                         </div>
 
@@ -196,6 +200,7 @@ window.ImmoApp.settings = {
             const clientId = await db.settings.get("googleClientId");
             const apiKey = await db.settings.get("googleApiKey");
             const driveFolder = await db.settings.get("googleDriveFolder");
+            const docAutoUpload = await db.settings.get("docAutoUpload");
 
             const clientInput = document.getElementById("google-client-id");
             const keyInput = document.getElementById("google-api-key");
@@ -204,6 +209,8 @@ window.ImmoApp.settings = {
             if (clientInput && clientId && clientId.value) clientInput.value = clientId.value;
             if (keyInput && apiKey && apiKey.value) keyInput.value = apiKey.value;
             if (folderInput && driveFolder && driveFolder.value) folderInput.value = driveFolder.value;
+            const autoEl = document.getElementById("doc-auto-upload");
+            if (autoEl) autoEl.checked = !docAutoUpload || String(docAutoUpload.value) !== "false";
         } catch (e) {
             console.error("Fehler beim Laden der Google-Konfiguration:", e);
         }
@@ -219,16 +226,25 @@ window.ImmoApp.settings = {
         const clientId = document.getElementById("google-client-id")?.value || "";
         const apiKey = document.getElementById("google-api-key")?.value || "";
         const driveFolder = document.getElementById("google-drive-folder")?.value || "";
+        const autoUpload = document.getElementById("doc-auto-upload")?.checked !== false;
 
         try {
             await db.settings.put({ key: "googleClientId", value: clientId });
             await db.settings.put({ key: "googleApiKey", value: apiKey });
             await db.settings.put({ key: "googleDriveFolder", value: driveFolder });
+            await db.settings.put({ key: "docAutoUpload", value: String(autoUpload) });
             alert("Google-Konfiguration wurde lokal gespeichert.");
         } catch (e) {
             console.error("Fehler beim Speichern der Google-Konfiguration:", e);
             alert("Fehler beim Speichern der Google-Konfiguration.");
         }
+    },
+
+    isDocumentAutoUploadEnabled: async function() {
+        const db = ImmoApp.db.instance;
+        const row = await db.settings.get("docAutoUpload");
+        if (!row || row.value == null || row.value === "") return true;
+        return String(row.value) !== "false";
     },
 
     loadSenderConfig: async function() {
@@ -342,6 +358,8 @@ window.ImmoApp.settings = {
         if(document.getElementById('exp-tenant').checked) data.tenants = await db.tenants.toArray();
         if(document.getElementById('exp-util').checked) data.utilities = await db.utilities.toArray();
         if(document.getElementById('exp-maint').checked) data.maintenance = await db.maintenance.toArray();
+        // Dokument-Metadaten immer mitsichern (klein, keine großen Binärdaten)
+        if (db.documents) data.documents = await db.documents.toArray();
 
         // Kontoauszüge ODER intelligentes KI-Wissen extrahieren
         if(document.getElementById('exp-tx').checked) {
@@ -399,6 +417,9 @@ window.ImmoApp.settings = {
             await db.settings.put({ key: "senderCity", value: sc.city || "" });
             await db.settings.put({ key: "senderCountry", value: sc.country || "" });
             await db.settings.put({ key: "senderIban", value: sc.iban || "" });
+            await db.settings.put({ key: "senderPlace", value: sc.place || "" });
+            await db.settings.put({ key: "senderFooter", value: sc.footer || "" });
+            await db.settings.put({ key: "senderLogoDataUrl", value: sc.logoDataUrl || "" });
             msg += `✅ Absenderdaten (Anschreiben/NK)\n`;
         }
 
@@ -421,6 +442,10 @@ window.ImmoApp.settings = {
         if (data.maintenance && data.maintenance.length > 0) {
             await db.maintenance.bulkPut(data.maintenance);
             msg += `✅ ${data.maintenance.length} Notizen & Zählerstände\n`;
+        }
+        if (data.documents && data.documents.length > 0 && db.documents) {
+            await db.documents.bulkPut(data.documents);
+            msg += `✅ ${data.documents.length} Dokument-Metadaten\n`;
         }
         alert(msg + "\nDie App wird nun neu geladen, um die Änderungen anzuzeigen.");
         location.reload();
@@ -634,6 +659,195 @@ window.ImmoApp.settings = {
         });
     },
 
+    _sanitizeFileName: function(input, fallback = "Dokument") {
+        const base = String(input || fallback)
+            .replace(/[\\\/:*?"<>|]/g, "_")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 120);
+        return base || fallback;
+    },
+
+    _buildPrivacySafeDocName: function(docType, year, tenantName) {
+        const type = docType === "NK" ? "NK" : "Letter";
+        const y = String(year || new Date().getFullYear());
+        const parts = String(tenantName || "").trim().split(/\s+/).filter(Boolean);
+        const initials = parts.length === 0
+            ? "tenant"
+            : (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+        return this._sanitizeFileName(`${type}_${y}_${initials}`);
+    },
+
+    _computeChecksum: async function(contentStr) {
+        if (!window.crypto || !window.crypto.subtle) return "";
+        const enc = new TextEncoder();
+        const buf = enc.encode(String(contentStr || ""));
+        const digest = await window.crypto.subtle.digest("SHA-256", buf);
+        return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, "0")).join("");
+    },
+
+    _retryDriveRequest: async function(fn, maxRetries = 3) {
+        let attempt = 0;
+        let waitMs = 500;
+        while (attempt <= maxRetries) {
+            try {
+                return await fn();
+            } catch (e) {
+                const status = e?.status || e?.result?.error?.code || e?.result?.code;
+                const retryable = status === 429 || status === 500 || status === 503;
+                if (!retryable || attempt === maxRetries) throw e;
+                await new Promise(r => setTimeout(r, waitMs));
+                waitMs *= 2;
+                attempt++;
+            }
+        }
+        throw new Error("Drive request failed");
+    },
+
+    _getConfiguredDriveFolderId: async function() {
+        const folderName = (document.getElementById("google-drive-folder")?.value || "").trim();
+        const db = ImmoApp.db.instance;
+        const folderFromDb = (await db.settings.get("googleDriveFolder"))?.value || "";
+        const finalFolderName = (folderName || folderFromDb || "").trim();
+        if (!finalFolderName) return null;
+
+        const escapedName = finalFolderName.replace(/'/g, "\\'");
+        const listResp = await this._retryDriveRequest(() => gapi.client.drive.files.list({
+            q: `name = '${escapedName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+            pageSize: 1,
+            fields: "files(id, name)"
+        }));
+        if (listResp?.result?.files?.length) return listResp.result.files[0].id;
+
+        const createResp = await this._retryDriveRequest(() => gapi.client.drive.files.create({
+            resource: {
+                name: finalFolderName,
+                mimeType: "application/vnd.google-apps.folder"
+            },
+            fields: "id"
+        }));
+        return createResp?.result?.id || null;
+    },
+
+    uploadDocumentToDrive: async function(options = {}) {
+        const {
+            content = "",
+            mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            fileName = "Dokument.docx"
+        } = options;
+
+        if (!content || !String(content).length) {
+            throw new Error("Dokument-Inhalt fehlt.");
+        }
+        const safeName = this._sanitizeFileName(fileName, "Dokument.docx");
+        const allowedMime = new Set([
+            "text/plain",
+            "text/html",
+            "application/json",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ]);
+        if (!allowedMime.has(mimeType)) {
+            throw new Error("Nicht erlaubter Dokumenttyp.");
+        }
+        if (String(content).length > 10 * 1024 * 1024) {
+            throw new Error("Dokument zu groß (max. 10 MB).");
+        }
+        await this.initGapiClient();
+        const folderId = await this._getConfiguredDriveFolderId();
+
+        const boundary = "doc_upload_" + Date.now();
+        const delimiter = "\r\n--" + boundary + "\r\n";
+        const closeDelimiter = "\r\n--" + boundary + "--";
+        const metadata = { name: safeName, mimeType: mimeType };
+        if (folderId) metadata.parents = [folderId];
+
+        const multipartRequestBody =
+            delimiter +
+            "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+            JSON.stringify(metadata) +
+            delimiter +
+            `Content-Type: ${mimeType}\r\n\r\n` +
+            String(content) +
+            closeDelimiter;
+
+        const response = await this._retryDriveRequest(() => gapi.client.request({
+            path: "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,modifiedTime",
+            method: "POST",
+            body: multipartRequestBody,
+            headers: {
+                "Content-Type": "multipart/related; boundary=" + boundary
+            }
+        }));
+        const result = response?.result || {};
+        if (!result.id) throw new Error("Drive-Datei konnte nicht erstellt werden.");
+        return {
+            id: result.id,
+            name: result.name || safeName,
+            webViewLink: result.webViewLink || "",
+            modifiedTime: result.modifiedTime || new Date().toISOString()
+        };
+    },
+
+    registerDocumentMetadata: async function(payload = {}) {
+        const db = ImmoApp.db.instance;
+        if (!db || !db.documents) return null;
+
+        const record = {
+            tenantId: payload.tenantId || null,
+            propertyId: payload.propertyId || null,
+            year: String(payload.year || new Date().getFullYear()),
+            docType: payload.docType || "LETTER",
+            periodStart: payload.periodStart || "",
+            periodEnd: payload.periodEnd || "",
+            title: String(payload.title || "").slice(0, 200),
+            fileNameSafe: String(payload.fileNameSafe || "").slice(0, 160),
+            driveFileId: payload.driveFileId || "",
+            driveWebViewLink: payload.driveWebViewLink || "",
+            driveModifiedTime: payload.driveModifiedTime || "",
+            checksum: payload.checksum || "",
+            localCacheRef: payload.localCacheRef || "",
+            localCacheAt: payload.localCacheAt || "",
+            createdAt: payload.createdAt || new Date().toISOString(),
+            createdBy: payload.createdBy || "local-user"
+        };
+
+        // Duplikate vermeiden: gleicher Typ + Zeitraum + checksum + tenant
+        if (record.checksum) {
+            const existing = await db.documents
+                .where("tenantId")
+                .equals(record.tenantId)
+                .filter(d => d.docType === record.docType && d.checksum === record.checksum && (d.periodStart || "") === (record.periodStart || "") && (d.periodEnd || "") === (record.periodEnd || ""))
+                .first();
+            if (existing) {
+                await db.documents.update(existing.id, record);
+                return existing.id;
+            }
+        }
+        return db.documents.add(record);
+    },
+
+    getDocumentsForTenant: async function(tenantId) {
+        const db = ImmoApp.db.instance;
+        if (!db || !db.documents || !tenantId) return [];
+        const rows = await db.documents.where("tenantId").equals(parseInt(tenantId, 10)).toArray();
+        rows.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+        return rows;
+    },
+
+    pruneDocumentLocalCache: async function(maxEntries = 30) {
+        const db = ImmoApp.db.instance;
+        if (!db || !db.documents) return;
+        const all = await db.documents.toArray();
+        const withCache = all.filter(d => d.localCacheRef);
+        if (withCache.length <= maxEntries) return;
+        withCache.sort((a, b) => new Date(b.localCacheAt || b.createdAt || 0) - new Date(a.localCacheAt || a.createdAt || 0));
+        const toRemove = withCache.slice(maxEntries);
+        for (const d of toRemove) {
+            await db.documents.update(d.id, { localCacheRef: "", localCacheAt: "" });
+        }
+    },
+
     syncToDrive: async function() {
         try {
             await this.initGapiClient();
@@ -743,7 +957,8 @@ window.ImmoApp.settings = {
                 db.tenants.clear(),
                 db.transactions.clear(),
                 db.utilities.clear(),
-                db.maintenance.clear()
+                db.maintenance.clear(),
+                db.documents.clear()
             ]);
             alert("Die Datenbank wurde komplett geleert. Die App wird neu gestartet.");
             location.reload();

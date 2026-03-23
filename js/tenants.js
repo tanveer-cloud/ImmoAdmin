@@ -83,6 +83,14 @@ window.ImmoApp.tenants = {
                             </div>
                         </div>
 
+                        <div class="bg-indigo-50 border border-indigo-100 rounded-lg p-4 mb-6">
+                            <div class="flex items-center justify-between mb-2">
+                                <h4 class="text-sm font-bold text-indigo-900">Dokumente (Drive/Local)</h4>
+                                <span class="text-[11px] text-indigo-700">Neueste zuerst</span>
+                            </div>
+                            <div id="history-documents-list" class="space-y-2 text-sm"></div>
+                        </div>
+
                         <div class="bg-white border rounded-lg overflow-hidden max-h-96 overflow-y-auto">
                             <table class="min-w-full divide-y divide-gray-200 text-sm">
                                 <thead class="bg-gray-100 sticky top-0">
@@ -364,6 +372,90 @@ __________________________
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+
+        try {
+            await this._persistGeneratedDocument({
+                tenant,
+                docType: "LETTER",
+                year: String(today.getFullYear()),
+                title: subject,
+                periodStart: "",
+                periodEnd: "",
+                contentText: `SUBJECT:\n${subject}\n\nBODY:\n${bodyText}\n\nATTACHMENTS:\n${attachmentsLines.join('\n')}\n\nFOOTER:\n${footerLines.join('\n')}`,
+                defaultFileNameBase: (ImmoApp.settings && ImmoApp.settings._buildPrivacySafeDocName)
+                    ? ImmoApp.settings._buildPrivacySafeDocName("LETTER", today.getFullYear(), tenant.name)
+                    : "Letter",
+                extension: "txt"
+            });
+        } catch (e) {
+            console.warn("Dokument-Metadaten konnten nicht gespeichert werden:", e);
+        }
+    },
+
+    _persistGeneratedDocument: async function(params = {}) {
+        const settings = ImmoApp.settings;
+        if (!settings || !settings.registerDocumentMetadata) return;
+        const tenant = params.tenant || null;
+        const tenantId = tenant && tenant.id ? tenant.id : null;
+        const propertyId = tenant && tenant.propertyId ? tenant.propertyId : null;
+        const contentText = String(params.contentText || "");
+        const checksum = settings._computeChecksum ? await settings._computeChecksum(contentText) : "";
+        const createdAt = new Date().toISOString();
+        const fileBase = settings._sanitizeFileName
+            ? settings._sanitizeFileName(params.defaultFileNameBase || "Dokument")
+            : String(params.defaultFileNameBase || "Dokument");
+        const extension = params.extension || "txt";
+        const fileName = `${fileBase}.${extension}`;
+
+        let driveFileId = "";
+        let driveWebViewLink = "";
+        let driveModifiedTime = "";
+        const autoUpload = settings.isDocumentAutoUploadEnabled ? await settings.isDocumentAutoUploadEnabled() : false;
+        if (checksum && ImmoApp.db?.instance?.documents) {
+            const existing = await ImmoApp.db.instance.documents
+                .where("tenantId")
+                .equals(tenantId)
+                .filter(d => d.docType === (params.docType || "LETTER") && d.checksum === checksum)
+                .first();
+            if (existing) {
+                driveFileId = existing.driveFileId || "";
+                driveWebViewLink = existing.driveWebViewLink || "";
+                driveModifiedTime = existing.driveModifiedTime || "";
+            }
+        }
+        if (autoUpload && settings.uploadDocumentToDrive && !driveFileId) {
+            try {
+                const up = await settings.uploadDocumentToDrive({
+                    fileName,
+                    content: contentText,
+                    mimeType: "text/plain"
+                });
+                driveFileId = up.id || "";
+                driveWebViewLink = up.webViewLink || "";
+                driveModifiedTime = up.modifiedTime || "";
+            } catch (e) {
+                console.warn("Drive-Upload fehlgeschlagen, Metadaten werden lokal gespeichert:", e);
+            }
+        }
+
+        await settings.registerDocumentMetadata({
+            tenantId: tenantId,
+            propertyId: propertyId,
+            year: String(params.year || ImmoApp.ui.currentYear || new Date().getFullYear()),
+            docType: params.docType || "LETTER",
+            periodStart: params.periodStart || "",
+            periodEnd: params.periodEnd || "",
+            title: String(params.title || "").slice(0, 200),
+            fileNameSafe: fileName,
+            driveFileId,
+            driveWebViewLink,
+            driveModifiedTime,
+            checksum,
+            localCacheRef: contentText.slice(0, 2500),
+            localCacheAt: createdAt,
+            createdAt
+        });
+        if (settings.pruneDocumentLocalCache) await settings.pruneDocumentLocalCache(30);
     },
 
     openMailDraft: async function(tenantId, subjectText, bodyText) {
@@ -778,6 +870,21 @@ Hinweistext (editierbar):
         const senderLines = [sender.name, sender.street, [sender.zip, sender.city].filter(Boolean).join(' '), sender.country].filter(Boolean);
 
         const year = ImmoApp.ui.currentYear;
+        const parseISODate = (s) => {
+            if (!s) return null;
+            const parts = String(s).split('-');
+            if (parts.length !== 3) return null;
+            const y = parseInt(parts[0], 10);
+            const m = parseInt(parts[1], 10);
+            const d = parseInt(parts[2], 10);
+            if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+            return new Date(y, m - 1, d);
+        };
+        const periodStart = parseISODate(periodStartISO);
+        const periodEnd = parseISODate(periodEndISO);
+        const usePeriod = !!(periodStart && periodEnd);
+        const fmtDE = (dt) => `${String(dt.getDate()).padStart(2, '0')}.${String(dt.getMonth() + 1).padStart(2, '0')}.${dt.getFullYear()}`;
+        const periodLabel = usePeriod ? `${fmtDE(periodStart)} - ${fmtDE(periodEnd)}` : String(year);
         const propId = tenant.propertyId || null;
         const property = propId ? await db.properties.get(propId) : null;
 
@@ -978,6 +1085,24 @@ Hinweistext (editierbar):
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+
+        try {
+            await this._persistGeneratedDocument({
+                tenant,
+                docType: "NK",
+                year: String(usePeriod ? periodEnd.getFullYear() : year),
+                title: subject,
+                periodStart: periodStartISO || "",
+                periodEnd: periodEndISO || "",
+                contentText: `SUBJECT:\n${subject}\n\nSUMMARY:\nGesamtkosten=${totalCosts}\nAnteil=${allocatedCosts}\nVorauszahlung=${totalPrepay}\nBilanz=${balance}\n\nPAYMENT:\n${paymentLines.join('\n')}\n\nATTACHMENTS:\n${attachmentsLines.join('\n')}\n\nNOTE:\n${noteText || ''}`,
+                defaultFileNameBase: (ImmoApp.settings && ImmoApp.settings._buildPrivacySafeDocName)
+                    ? ImmoApp.settings._buildPrivacySafeDocName("NK", usePeriod ? periodEnd.getFullYear() : year, tenant.name)
+                    : "NK",
+                extension: "txt"
+            });
+        } catch (e) {
+            console.warn("NK-Dokument-Metadaten konnten nicht gespeichert werden:", e);
+        }
     },
 
     // NEU: Direkte Löschfunktion aus der Historie
@@ -1139,6 +1264,35 @@ Hinweistext (editierbar):
         }
 
         document.getElementById('history-table-body').innerHTML = tbody;
+        const docsListEl = document.getElementById('history-documents-list');
+        if (docsListEl) {
+            const docs = (ImmoApp.settings && ImmoApp.settings.getDocumentsForTenant)
+                ? await ImmoApp.settings.getDocumentsForTenant(tenantId)
+                : [];
+            if (!docs || docs.length === 0) {
+                docsListEl.innerHTML = `<div class="text-gray-500 italic">Noch keine gespeicherten Dokumente.</div>`;
+            } else {
+                docsListEl.innerHTML = docs.map(d => {
+                    const when = d.createdAt ? new Date(d.createdAt).toLocaleString('de-DE') : '-';
+                    const label = d.docType === "NK" ? "NK-Abrechnung" : "Anschreiben";
+                    const driveBtn = d.driveWebViewLink
+                        ? `<a href="${d.driveWebViewLink}" target="_blank" rel="noopener noreferrer" class="text-xs bg-indigo-600 text-white px-2 py-1 rounded hover:bg-indigo-700">In Drive öffnen</a>`
+                        : `<span class="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">Nur lokal</span>`;
+                    return `
+                        <div class="bg-white border border-indigo-100 rounded p-2 flex items-center justify-between gap-2">
+                            <div class="min-w-0">
+                                <div class="text-xs font-bold text-indigo-900">${label} · ${d.year || '-'}</div>
+                                <div class="text-xs text-gray-600 truncate">${d.title || d.fileNameSafe || '-'}</div>
+                                <div class="text-[11px] text-gray-400">${when}</div>
+                            </div>
+                            <div class="flex items-center gap-2 shrink-0">
+                                ${driveBtn}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+        }
         document.getElementById('modal-tenant-history').classList.remove('hidden');
     },
 

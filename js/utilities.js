@@ -1038,9 +1038,12 @@ ${paymentDefault}
         html2pdf().set(opt).from(element).save();
     },
 
-    downloadWord: function() {
+    downloadWord: async function() {
         const year = ImmoApp.ui.currentYear;
-        const tenantName = document.getElementById("export-tenant-select").options[document.getElementById("export-tenant-select").selectedIndex].text;
+        const tenantSelect = document.getElementById("export-tenant-select");
+        const tenantName = tenantSelect.options[tenantSelect.selectedIndex].text;
+        const tenantId = parseInt(tenantSelect.value || "", 10);
+        const propId = parseInt(document.getElementById("export-prop-select")?.value || "", 10) || null;
         
         const contentHTML = document.getElementById('statement-doc').innerHTML;
         const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Abrechnung</title></head><body>";
@@ -1055,6 +1058,68 @@ ${paymentDefault}
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        try {
+            const settings = ImmoApp.settings;
+            if (settings && settings.registerDocumentMetadata) {
+                const checksum = settings._computeChecksum ? await settings._computeChecksum(html) : "";
+                const safeBase = settings._buildPrivacySafeDocName
+                    ? settings._buildPrivacySafeDocName("NK", year, tenantName)
+                    : `NK_${year}`;
+                let driveFileId = "";
+                let driveWebViewLink = "";
+                let driveModifiedTime = "";
+
+                if (checksum && ImmoApp.db?.instance?.documents && Number.isFinite(tenantId)) {
+                    const existing = await ImmoApp.db.instance.documents
+                        .where("tenantId")
+                        .equals(tenantId)
+                        .filter(d => d.docType === "NK" && d.checksum === checksum)
+                        .first();
+                    if (existing) {
+                        driveFileId = existing.driveFileId || "";
+                        driveWebViewLink = existing.driveWebViewLink || "";
+                        driveModifiedTime = existing.driveModifiedTime || "";
+                    }
+                }
+
+                const autoUpload = settings.isDocumentAutoUploadEnabled ? await settings.isDocumentAutoUploadEnabled() : false;
+                if (autoUpload && settings.uploadDocumentToDrive && !driveFileId) {
+                    try {
+                        const up = await settings.uploadDocumentToDrive({
+                            fileName: `${safeBase}.html`,
+                            content: html,
+                            mimeType: "text/html"
+                        });
+                        driveFileId = up.id || "";
+                        driveWebViewLink = up.webViewLink || "";
+                        driveModifiedTime = up.modifiedTime || "";
+                    } catch (e) {
+                        console.warn("Drive-Upload (Utilities) fehlgeschlagen:", e);
+                    }
+                }
+
+                await settings.registerDocumentMetadata({
+                    tenantId: Number.isFinite(tenantId) ? tenantId : null,
+                    propertyId: propId,
+                    year: String(year),
+                    docType: "NK",
+                    title: `Nebenkostenabrechnung ${year} – ${tenantName}`,
+                    fileNameSafe: `${safeBase}.html`,
+                    driveFileId,
+                    driveWebViewLink,
+                    driveModifiedTime,
+                    checksum,
+                    localCacheRef: html.slice(0, 2500),
+                    localCacheAt: new Date().toISOString(),
+                    createdAt: new Date().toISOString()
+                });
+                if (settings.pruneDocumentLocalCache) await settings.pruneDocumentLocalCache(30);
+            }
+        } catch (e) {
+            console.warn("Dokument-Metadaten (Utilities) konnten nicht gespeichert werden:", e);
+        }
     },
 
     render: function() {

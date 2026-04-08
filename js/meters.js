@@ -7,11 +7,57 @@ window.ImmoApp.meters = {
         { val: "WASSER", label: "Wasser", unit: "m³" }
     ],
 
+    _useApiData: function () {
+        return !!(ImmoApp.api && ImmoApp.api.useApiData());
+    },
+
+    _syncApiBanner: function () {
+        const apiBanner = document.getElementById("meters-api-banner");
+        if (!apiBanner) return;
+        if (this._useApiData()) {
+            apiBanner.className = "rounded-lg border border-blue-200 bg-blue-50 text-blue-900 px-4 py-3 text-sm";
+            apiBanner.innerHTML =
+                "<strong>API-Modus:</strong> Objekte, Mieter, Zähler, Tarife und Ablesungen werden über die Server-API geladen und gespeichert. " +
+                "Die WG-Verteilungsoption (A/B) bleibt pro Browser in der lokalen IndexedDB.";
+        } else {
+            apiBanner.className = "";
+            apiBanner.innerHTML = "";
+        }
+    },
+
+    _loadPropsForMeters: async function () {
+        if (this._useApiData()) {
+            try {
+                const r = await ImmoApp.api.getProperties({ limit: 500 });
+                return (r.data || []).map(ImmoApp.api.mapPropertyFromApi);
+            } catch (e) {
+                console.warn(e);
+                return [];
+            }
+        }
+        return await ImmoApp.db.instance.properties.toArray();
+    },
+
+    _loadTenantsForPropertyMeter: async function (propertyId) {
+        const pid = parseInt(String(propertyId), 10);
+        if (!Number.isFinite(pid)) return [];
+        if (this._useApiData()) {
+            try {
+                const r = await ImmoApp.api.getTenants({ limit: 500 });
+                return (r.data || []).map(ImmoApp.api.mapTenantFromApi).filter(function (t) { return t.propertyId === pid; });
+            } catch (e) {
+                return [];
+            }
+        }
+        return await ImmoApp.db.instance.tenants.where("propertyId").equals(pid).toArray();
+    },
+
     setupHTML: function() {
         const container = document.getElementById("meters-content");
         if (!container || !container.innerHTML.includes("Lade Module...")) return;
         container.innerHTML = `
             <div class="space-y-8">
+                <div id="meters-api-banner"></div>
                 <!-- Verteilung WG: A oder B -->
                 <div class="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
                     <h3 class="text-sm font-bold text-gray-800 mb-2">WG-Verteilung Verbrauch (Strom/Gas/Wasser)</h3>
@@ -135,6 +181,7 @@ window.ImmoApp.meters = {
                 </div>
             </div>
         `;
+        this._syncApiBanner();
         this.loadDistributionMode();
         this.renderLists();
     },
@@ -158,10 +205,32 @@ window.ImmoApp.meters = {
 
     renderLists: async function() {
         const db = ImmoApp.db.instance;
-        const props = await db.properties.toArray();
-        const meters = await db.meters.toArray();
-        const tariffs = await db.tariffs.toArray();
-        const readings = await db.meterReadings.toArray();
+        const props = await this._loadPropsForMeters();
+        let meters;
+        let tariffs;
+        let readings;
+        if (this._useApiData()) {
+            try {
+                const [mr, tr, rr] = await Promise.all([
+                    ImmoApp.api.getMeters({ limit: 5000 }),
+                    ImmoApp.api.getTariffs({ limit: 5000 }),
+                    ImmoApp.api.getMeterReadings({ limit: 20000 })
+                ]);
+                meters = (mr.data || []).map(ImmoApp.api.mapMeterFromApi).filter(Boolean);
+                tariffs = (tr.data || []).map(ImmoApp.api.mapTariffFromApi).filter(Boolean);
+                readings = (rr.data || []).map(ImmoApp.api.mapMeterReadingFromApi).filter(Boolean);
+            } catch (e) {
+                console.error(e);
+                alert(e.message || "API: Zähler-/Tarifdaten konnten nicht geladen werden.");
+                meters = [];
+                tariffs = [];
+                readings = [];
+            }
+        } else {
+            meters = await db.meters.toArray();
+            tariffs = await db.tariffs.toArray();
+            readings = await db.meterReadings.toArray();
+        }
 
         const propSelect = document.getElementById("meter-prop");
         const readingMeterSelect = document.getElementById("reading-meter");
@@ -236,7 +305,20 @@ window.ImmoApp.meters = {
             alert("Bitte Objekt und Typ wählen.");
             return;
         }
-        await db.meters.add({ propertyId: parseInt(propertyId), type: type, name: name || type });
+        if (this._useApiData()) {
+            try {
+                await ImmoApp.api.postMeter({
+                    property_id: parseInt(propertyId, 10),
+                    type: type,
+                    name: name || type
+                });
+            } catch (e) {
+                alert(e.message || "API: Zähler anlegen fehlgeschlagen.");
+                return;
+            }
+        } else {
+            await db.meters.add({ propertyId: parseInt(propertyId, 10), type: type, name: name || type });
+        }
         document.getElementById("meter-name").value = "";
         this.renderLists();
     },
@@ -244,9 +326,18 @@ window.ImmoApp.meters = {
     deleteMeter: async function(id) {
         if (!confirm("Zähler und alle zugehörigen Ablesungen wirklich löschen?")) return;
         const db = ImmoApp.db.instance;
-        const readings = await db.meterReadings.where("meterId").equals(id).toArray();
-        for (const r of readings) await db.meterReadings.delete(r.id);
-        await db.meters.delete(id);
+        if (this._useApiData()) {
+            try {
+                await ImmoApp.api.deleteMeter(id);
+            } catch (e) {
+                alert(e.message || "API: Löschen fehlgeschlagen (ggf. nur als Administrator erlaubt).");
+                return;
+            }
+        } else {
+            const readings = await db.meterReadings.where("meterId").equals(id).toArray();
+            for (const r of readings) await db.meterReadings.delete(r.id);
+            await db.meters.delete(id);
+        }
         this.renderLists();
     },
 
@@ -260,7 +351,21 @@ window.ImmoApp.meters = {
             alert("Bitte Typ, Gültig-ab-Datum und Preis pro Einheit angeben.");
             return;
         }
-        await db.tariffs.add({ type: type, validFrom: validFrom, pricePerUnit: pricePerUnit, basicFeePerMonth: basicFeePerMonth });
+        if (this._useApiData()) {
+            try {
+                await ImmoApp.api.postTariff({
+                    type: type,
+                    valid_from: validFrom,
+                    price_per_unit: pricePerUnit,
+                    basic_fee_per_month: basicFeePerMonth != null ? basicFeePerMonth : null
+                });
+            } catch (e) {
+                alert(e.message || "API: Tarif anlegen fehlgeschlagen.");
+                return;
+            }
+        } else {
+            await db.tariffs.add({ type: type, validFrom: validFrom, pricePerUnit: pricePerUnit, basicFeePerMonth: basicFeePerMonth });
+        }
         document.getElementById("tariff-validFrom").value = "";
         document.getElementById("tariff-pricePerUnit").value = "";
         document.getElementById("tariff-basicFee").value = "";
@@ -269,7 +374,16 @@ window.ImmoApp.meters = {
 
     deleteTariff: async function(id) {
         if (!confirm("Tarif wirklich löschen?")) return;
-        await ImmoApp.db.instance.tariffs.delete(id);
+        if (this._useApiData()) {
+            try {
+                await ImmoApp.api.deleteTariff(id);
+            } catch (e) {
+                alert(e.message || "API: Löschen fehlgeschlagen (ggf. nur als Administrator erlaubt).");
+                return;
+            }
+        } else {
+            await ImmoApp.db.instance.tariffs.delete(id);
+        }
         this.renderLists();
     },
 
@@ -282,7 +396,20 @@ window.ImmoApp.meters = {
             alert("Bitte Zähler, Datum und Zählerstand angeben.");
             return;
         }
-        await db.meterReadings.add({ meterId: parseInt(meterId), date: date, value: value });
+        if (this._useApiData()) {
+            try {
+                await ImmoApp.api.postMeterReading({
+                    meter_id: parseInt(meterId, 10),
+                    date_value: date,
+                    value: value
+                });
+            } catch (e) {
+                alert(e.message || "API: Ablesung fehlgeschlagen.");
+                return;
+            }
+        } else {
+            await db.meterReadings.add({ meterId: parseInt(meterId, 10), date: date, value: value });
+        }
         document.getElementById("reading-date").value = "";
         document.getElementById("reading-value").value = "";
         this.renderLists();
@@ -290,24 +417,52 @@ window.ImmoApp.meters = {
 
     deleteReading: async function(id) {
         if (!confirm("Ablesung wirklich löschen?")) return;
-        await ImmoApp.db.instance.meterReadings.delete(id);
+        if (this._useApiData()) {
+            try {
+                await ImmoApp.api.deleteMeterReading(id);
+            } catch (e) {
+                alert(e.message || "API: Löschen fehlgeschlagen (ggf. nur als Administrator erlaubt).");
+                return;
+            }
+        } else {
+            await ImmoApp.db.instance.meterReadings.delete(id);
+        }
         this.renderLists();
     },
 
     getTariffFor: function(type, dateStr) {
-        return ImmoApp.db.instance.tariffs.where("type").equals(type).toArray().then(list => {
+        const pick = function (list) {
             const d = dateStr ? new Date(dateStr) : new Date(0);
             const valid = list.filter(t => new Date(t.validFrom || 0) <= d);
             valid.sort((a, b) => new Date(b.validFrom || 0) - new Date(a.validFrom || 0));
             return valid[0] || null;
-        });
+        };
+        if (this._useApiData()) {
+            return ImmoApp.api.getTariffs({ limit: 5000 }).then(function (r) {
+                const list = (r.data || []).map(ImmoApp.api.mapTariffFromApi).filter(function (t) {
+                    return t && t.type === type;
+                });
+                return pick(list);
+            });
+        }
+        return ImmoApp.db.instance.tariffs.where("type").equals(type).toArray().then(pick);
     },
 
     calcMeterPeriod: async function(meterId, startDate, endDate) {
         const db = ImmoApp.db.instance;
-        const meter = await db.meters.get(meterId);
-        if (!meter) return null;
-        const readings = await db.meterReadings.where("meterId").equals(meterId).toArray();
+        let meter;
+        let readings;
+        if (this._useApiData()) {
+            const raw = await ImmoApp.api.getMeter(meterId);
+            if (!raw) return null;
+            meter = ImmoApp.api.mapMeterFromApi(raw);
+            const rr = await ImmoApp.api.getMeterReadings({ meter_id: meterId, limit: 5000 });
+            readings = (rr.data || []).map(ImmoApp.api.mapMeterReadingFromApi).filter(Boolean);
+        } else {
+            meter = await db.meters.get(meterId);
+            if (!meter) return null;
+            readings = await db.meterReadings.where("meterId").equals(meterId).toArray();
+        }
         readings.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
         const start = startDate || readings[0]?.date;
         const end = endDate || readings[readings.length - 1]?.date;
@@ -327,7 +482,7 @@ window.ImmoApp.meters = {
         const monthsInPeriod = daysInPeriod / 30.44;
         const totalCost = consumption * pricePerUnit + (basicFeePerMonth || 0) * monthsInPeriod;
 
-        const tenants = await db.tenants.where("propertyId").equals(meter.propertyId).toArray();
+        const tenants = await this._loadTenantsForPropertyMeter(meter.propertyId);
         const periodStart = new Date(start);
         const periodEnd = new Date(end);
         const mode = (await db.settings.get("wgDistributionMode"))?.value || "PERSON_DAYS";
@@ -397,6 +552,7 @@ window.ImmoApp.meters = {
 
     render: function() {
         this.setupHTML();
+        this._syncApiBanner();
         this.renderLists();
     }
 };

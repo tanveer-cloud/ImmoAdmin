@@ -47,43 +47,60 @@ window.ImmoApp.search = {
         this.setupHTML();
         const db = ImmoApp.db.instance;
 
-        // --- 1. DATEN DURCHSUCHEN ---
-        
-        // a) Mieter und Objekte
-        const tenants = await db.tenants.toArray();
-        const props = await db.properties.toArray();
-        
-        const matchedTenants = tenants.filter(t => 
-            t.name.toLowerCase().includes(query) || 
+        let tenants;
+        let props;
+        let trans;
+        let maintRows;
+
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            try {
+                const [tn, pr, tr, mr] = await Promise.all([
+                    ImmoApp.api.getTenants({ limit: 500 }),
+                    ImmoApp.api.getProperties({ limit: 500 }),
+                    ImmoApp.api.getTransactions({ limit: 8000 }),
+                    ImmoApp.api.getMaintenance({ limit: 5000 })
+                ]);
+                tenants = (tn.data || []).map(ImmoApp.api.mapTenantFromApi);
+                props = (pr.data || []).map(ImmoApp.api.mapPropertyFromApi);
+                trans = (tr.data || []).map(ImmoApp.api.mapTransactionFromApi);
+                maintRows = (mr.data || []).map(ImmoApp.api.mapMaintenanceFromApi);
+            } catch (e) {
+                alert(e.message || "API-Suche fehlgeschlagen.");
+                return;
+            }
+        } else {
+            tenants = await db.tenants.toArray();
+            props = await db.properties.toArray();
+            trans = await db.transactions.toArray();
+            maintRows = db.tables.find(t => t.name === "maintenance")
+                ? await db.table("maintenance").toArray()
+                : [];
+        }
+
+        const matchedTenants = tenants.filter(t =>
+            t.name.toLowerCase().includes(query) ||
             (t.iban && t.iban.toLowerCase().includes(query))
         );
-        
-        // Falls jemand nach einem Objekt (z.B. "Forststraße") sucht, zeige auch dessen Mieter
+
         const matchedProps = props.filter(p => p.name.toLowerCase().includes(query));
         matchedProps.forEach(p => {
             tenants.filter(t => t.propertyId === p.id).forEach(t => {
-                if(!matchedTenants.find(mt => mt.id === t.id)) matchedTenants.push(t);
+                if (!matchedTenants.find(mt => mt.id === t.id)) matchedTenants.push(t);
             });
         });
 
-        // b) Kontoauszüge (Transaktionen)
-        const trans = await db.transactions.toArray();
-        const matchedTrans = trans.filter(tx => 
+        const matchedTrans = trans.filter(tx =>
             (tx.name && tx.name.toLowerCase().includes(query)) ||
             (tx.purpose && tx.purpose.toLowerCase().includes(query)) ||
             (tx.amount.toString().includes(query)) ||
             (tx.iban && tx.iban.toLowerCase().includes(query)) ||
-            (tx.date.includes(query))
+            (tx.date && tx.date.includes(query))
         );
 
-        // c) Wartung
-        let matchedMaint = [];
-        if(db.tables.find(t => t.name === 'maintenance')) {
-            const maint = await db.table('maintenance').toArray();
-            matchedMaint = maint.filter(m => m.task.toLowerCase().includes(query));
-        }
+        const matchedMaint = maintRows.filter(m =>
+            (m.task || "").toLowerCase().includes(query)
+        );
 
-        // --- 2. ERGEBNISSE ANZEIGEN ---
         this.renderResults(matchedTenants, matchedTrans, matchedMaint, props);
     },
 
@@ -127,7 +144,13 @@ window.ImmoApp.search = {
             hasResults = true;
             elTrans.classList.remove('hidden');
             // Zeige max 50 Buchungen, damit der Browser nicht überlastet wird, chronologisch sortiert
-            trans.sort((a,b) => new Date(b.date.split('.').reverse().join('-')) - new Date(a.date.split('.').reverse().join('-')))
+            trans.sort((a, b) => {
+                const pa = (a.date || "").split(".");
+                const pb = (b.date || "").split(".");
+                const da = pa.length === 3 ? new Date(pa[2].length === 2 ? "20" + pa[2] : pa[2], parseInt(pa[1], 10) - 1, parseInt(pa[0], 10)) : 0;
+                const dbi = pb.length === 3 ? new Date(pb[2].length === 2 ? "20" + pb[2] : pb[2], parseInt(pb[1], 10) - 1, parseInt(pb[0], 10)) : 0;
+                return dbi - da;
+            })
                  .slice(0, 50).forEach(tx => {
                 const amountColor = tx.amount >= 0 ? 'text-green-600' : 'text-gray-800';
                 listTrans.innerHTML += `
@@ -150,10 +173,13 @@ window.ImmoApp.search = {
             hasResults = true;
             elMaint.classList.remove('hidden');
             maint.forEach(m => {
+                const done = m.status === "DONE" || m.status === "Erledigt";
+                const stLabel = done ? "Erledigt" : "Offen";
+                const dateStr = m.date ? new Date(m.date).toLocaleDateString("de-DE") : "–";
                 listMaint.innerHTML += `
                     <li class="bg-white p-3 rounded-lg shadow-sm border border-gray-100 hover:bg-gray-50 text-sm">
-                        <span class="text-gray-500 mr-2 font-mono text-xs">${new Date(m.date).toLocaleDateString('de-DE')}</span>
-                        ${m.task} <span class="text-xs font-bold ml-2 ${m.status === 'Erledigt' ? 'text-green-600' : 'text-orange-500'}">[${m.status}]</span>
+                        <span class="text-gray-500 mr-2 font-mono text-xs">${dateStr}</span>
+                        ${m.task} <span class="text-xs font-bold ml-2 ${done ? 'text-green-600' : 'text-orange-500'}">[${stLabel}]</span>
                     </li>
                 `;
             });

@@ -5,53 +5,78 @@ window.ImmoApp.settings = {
         const container = document.getElementById("settings-content");
         if (container && container.innerHTML.includes("Lade Module...")) {
             container.innerHTML = `
-                <div class="mb-6">
-                    <h2 class="text-2xl font-bold text-gray-800">Datenverwaltung, Cloud-Konfiguration & Reset</h2>
-                    <p class="text-gray-500 text-sm">Hier kannst du deine Daten sichern, eine Google API-Konfiguration hinterlegen oder Backups einspielen.</p>
+                <div class="mb-4">
+                    <h2 class="text-2xl font-bold text-gray-800">Einstellungen</h2>
+                    <p class="text-gray-500 text-sm mt-1">Themen sind getrennt, damit du nur das siehst, was du brauchst. Viele Felder sind optional (z.&nbsp;B. Google&nbsp;Drive).</p>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-                    
-                    <!-- Google API / Cloud-Konfiguration -->
-                    <div class="bg-white p-6 rounded-lg shadow-sm border border-indigo-100 flex flex-col justify-between">
-                        <div>
-                            <h3 class="text-lg font-bold text-indigo-800 mb-2">🔑 Google API & Drive</h3>
-                            <p class="text-sm text-gray-600 mb-4 border-b pb-4">
-                                Trage hier deine Google-API-Daten ein, wenn du die App später mit Google Drive verbinden möchtest
-                                (z.B. wenn sie über GitHub Pages unter https läuft). Lokal bleiben diese Werte sicher im Browser gespeichert.
-                            </p>
+                <div class="flex flex-wrap gap-2 mb-6 pb-3 border-b border-slate-200">
+                    <button type="button" id="settings-tab-server" onclick="ImmoApp.settings.switchSettingsTab('server')" class="settings-cat-tab nav-btn py-2 px-3 text-sm rounded-md text-gray-600 hover:text-blue-700 tab-active">Server &amp; API</button>
+                    <button type="button" id="settings-tab-backup" onclick="ImmoApp.settings.switchSettingsTab('backup')" class="settings-cat-tab nav-btn py-2 px-3 text-sm rounded-md text-gray-600 hover:text-blue-700">Backup &amp; Import</button>
+                    <button type="button" id="settings-tab-google" onclick="ImmoApp.settings.switchSettingsTab('google')" class="settings-cat-tab nav-btn py-2 px-3 text-sm rounded-md text-gray-600 hover:text-blue-700">Google Drive</button>
+                    <button type="button" id="settings-tab-brief" onclick="ImmoApp.settings.switchSettingsTab('brief')" class="settings-cat-tab nav-btn py-2 px-3 text-sm rounded-md text-gray-600 hover:text-blue-700">Briefkopf</button>
+                    <button type="button" id="settings-tab-danger" onclick="ImmoApp.settings.switchSettingsTab('danger')" class="settings-cat-tab nav-btn py-2 px-3 text-sm rounded-md text-red-700 hover:text-red-800 hover:bg-red-50">Daten löschen</button>
+                </div>
 
-                            <div class="space-y-3 mb-4">
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">OAuth Client ID</label>
-                                    <input type="text" id="google-client-id" class="w-full border rounded p-2 text-xs bg-gray-50 font-mono" placeholder="1234567890-abc.apps.googleusercontent.com">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
-                                    <input type="text" id="google-api-key" class="w-full border rounded p-2 text-xs bg-gray-50 font-mono" placeholder="AIzaSy...">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">Drive-Ordner (optional)</label>
-                                    <input type="text" id="google-drive-folder" class="w-full border rounded p-2 text-xs bg-gray-50" placeholder="z.B. ImmoAdmin-Daten">
-                                    <p class="text-[11px] text-gray-400 mt-1">
-                                        Optionaler Zielordner für Dokumente/Backups. Wenn leer, speichert die App im Standardbereich von Drive.
-                                    </p>
-                                </div>
-                                <label class="flex items-center gap-2 cursor-pointer">
-                                    <input type="checkbox" id="doc-auto-upload" class="w-4 h-4 text-indigo-600 rounded">
-                                    <span class="text-sm text-gray-700">Dokumente (DOCX) nach Erstellung automatisch zu Drive hochladen</span>
-                                </label>
-                            </div>
+                <div id="settings-panel-server" class="settings-subpanel mb-2">
+                <div class="mb-6 bg-white p-4 rounded-lg shadow-sm border border-slate-200">
+                    <h3 class="text-base font-bold text-slate-800 mb-2">Server-Modus (API-first, Option C)</h3>
+                    <p class="text-xs text-slate-500 mb-3">Optional: Nutze die Server-API statt rein lokalem Browser-Speicher (Dexie). Nötig für gemeinsame Nutzung mit Login.</p>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                        <div class="md:col-span-2">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">API Base URL</label>
+                            <input type="text" id="api-base-url" class="w-full border rounded p-2 text-xs bg-gray-50 font-mono" placeholder="https://deine-domain.de/api oder http://127.0.0.1:8000">
                         </div>
-
-                        <button onclick="ImmoApp.settings.saveGoogleConfig()" class="bg-indigo-600 text-white px-4 py-3 rounded-lg shadow font-bold w-full hover:bg-indigo-700 transition flex justify-center items-center gap-2">
-                            <span>💾</span> Google-Konfiguration speichern
-                        </button>
+                        <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
+                            <input type="checkbox" id="api-mode-enabled" class="w-4 h-4 text-slate-700 rounded">
+                            API-Modus aktiv
+                        </label>
                     </div>
-                    
+                    <div class="mt-3 flex flex-wrap gap-2 items-center">
+                        <button onclick="ImmoApp.settings.saveApiConfig()" class="bg-slate-700 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-slate-800 transition">Server-Konfiguration speichern</button>
+                        <button type="button" onclick="ImmoApp.settings.apiLogin()" class="bg-emerald-700 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-emerald-800 transition">Anmelden</button>
+                        <button type="button" onclick="ImmoApp.settings.apiLogout()" class="bg-slate-500 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-slate-600 transition">Abmelden</button>
+                    </div>
+                    <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">API-Benutzer</label>
+                            <input type="text" id="api-username" class="w-full border rounded p-2 text-sm bg-white" autocomplete="username">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Passwort</label>
+                            <input type="password" id="api-password" class="w-full border rounded p-2 text-sm bg-white" autocomplete="current-password">
+                        </div>
+                    </div>
+                    <p id="api-me-status" class="mt-2 text-xs text-slate-600 font-mono"></p>
+
+                    <div class="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <p class="text-xs font-medium text-slate-700 mb-2">Verbindung testen &amp; Schnellfüller</p>
+                        <div class="flex flex-wrap items-center gap-2 mb-2">
+                            <button type="button" onclick="ImmoApp.settings.apiHealthCheck()" class="bg-sky-700 text-white px-3 py-1.5 rounded text-sm font-bold hover:bg-sky-800 transition">API erreichbar testen</button>
+                            <button type="button" onclick="ImmoApp.settings.fillSameOriginApiUrl()" class="bg-white border border-slate-300 text-slate-700 px-3 py-1.5 rounded text-sm hover:bg-slate-100 transition" title="Nur wenn die API unter dieser Domain unter /api erreichbar ist">URL: diese Domain /api</button>
+                            <button type="button" onclick="ImmoApp.settings.fillDockerApiUrl()" class="bg-white border border-slate-300 text-slate-700 px-3 py-1.5 rounded text-sm hover:bg-slate-100 transition">URL: Docker (8000)</button>
+                        </div>
+                        <p id="api-docker-test-status" class="text-xs text-slate-600 font-mono min-h-[1.25rem] whitespace-pre-wrap break-all"></p>
+                        <details class="mt-2 text-xs text-slate-600">
+                            <summary class="cursor-pointer font-medium text-slate-700 select-none">Lokal mit Docker (Entwicklung)</summary>
+                            <ol class="list-decimal pl-4 mt-2 space-y-1.5">
+                                <li>Terminal im Ordner <code class="bg-white px-1 rounded border border-slate-200">server</code>: <code class="bg-white px-1 rounded border border-slate-200">docker compose build</code> · dann <code class="bg-white px-1 rounded border border-slate-200">docker compose up</code> (API auf Port 8000).</li>
+                                <li>Bei neuer/leerer SQLite-DB einmalig: <code class="bg-white px-1 rounded border border-slate-200">docker compose run --rm immoadmin-api php server/database/migrate.php</code> und <code class="bg-white px-1 rounded border border-slate-200">docker compose run --rm immoadmin-api php server/database/create_admin.php admin DEINPASSWORT</code></li>
+                                <li><code class="bg-white px-1 rounded border border-slate-200">http://127.0.0.1:8000</code> eintragen (Button), speichern, „API-Modus aktiv“, dann Anmelden.</li>
+                                <li>Frontend per <code class="bg-white px-1 rounded border border-slate-200">https://…</code> oder <code class="bg-white px-1 rounded border border-slate-200">http://localhost/…</code> öffnen – nicht <code class="bg-white px-1 rounded border border-slate-200">file://</code>.</li>
+                            </ol>
+                            <p class="mt-2 text-[11px] text-slate-500">PowerShell: Befehle mit <code class="bg-white px-1 rounded border border-slate-200">;</code> verketten, nicht mit <code class="bg-white px-1 rounded border border-slate-200">&amp;&amp;</code>.</p>
+                        </details>
+                    </div>
+                </div>
+                </div>
+
+                <div id="settings-panel-backup" class="settings-subpanel mb-2 hidden">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     <div class="bg-white p-6 rounded-lg shadow-sm border border-blue-100">
                         <h3 class="text-lg font-bold text-blue-800 mb-2">📥 Selektives Backup (Export)</h3>
-                        <p class="text-sm text-gray-600 mb-4 border-b pb-4">Wähle genau aus, was du in deine Backup-Datei speichern möchtest.</p>
+                        <p class="text-sm text-gray-600 mb-2 border-b pb-4">Wähle genau aus, was du in deine Backup-Datei speichern möchtest.</p>
+                        <p id="export-api-hint" class="hidden text-xs text-sky-800 bg-sky-50 border border-sky-200 rounded p-2 mb-3">API-Modus: Export nutzt die ausgewählten Daten <strong>vom Server</strong> (inkl. Zähler/Tarife/Ablesungen, sofern angehakt).</p>
                         
                         <div class="space-y-3 mb-6">
                             <label class="flex items-center gap-3 cursor-pointer">
@@ -86,21 +111,17 @@ window.ImmoApp.settings = {
                                 <input type="checkbox" id="exp-maint" checked class="w-5 h-5 text-blue-600 rounded"> 
                                 <span class="font-medium text-gray-700">🛠️ Wartung, Zählerstände & Notizen</span>
                             </label>
+
+                            <label class="flex items-center gap-3 cursor-pointer">
+                                <input type="checkbox" id="exp-meter" checked class="w-5 h-5 text-blue-600 rounded">
+                                <span class="font-medium text-gray-700">⚡ Zähler, Tarife & Ablesungen (Strom/Gas/Wasser)</span>
+                            </label>
                         </div>
                         
                         <button onclick="ImmoApp.settings.runExport()" class="bg-blue-600 text-white px-4 py-3 rounded-lg shadow font-bold w-full hover:bg-blue-700 transition flex justify-center items-center gap-2">
                             <span>💾</span> Ausgewählte Daten herunterladen (.json)
                         </button>
-                        <div class="mt-4 space-y-2 border-t pt-4">
-                            <h4 class="text-sm font-bold text-blue-800 mb-1">🌥️ Google Drive Sync (Beta)</h4>
-                            <button onclick="ImmoApp.settings.syncToDrive()" class="w-full bg-indigo-600 text-white px-3 py-2 rounded-lg text-sm font-bold hover:bg-indigo-700 flex items-center justify-center gap-2">
-                                <span>⬆️</span><span>Mit Drive synchronisieren</span>
-                            </button>
-                            <button onclick="ImmoApp.settings.syncFromDrive()" class="w-full bg-indigo-50 text-indigo-800 px-3 py-2 rounded-lg text-sm font-bold hover:bg-indigo-100 flex items-center justify-center gap-2">
-                                <span>⬇️</span><span>Von Drive laden</span>
-                            </button>
-                            <p class="text-[11px] text-gray-400">Hinweis: Nutzt deine oben hinterlegte Client ID / API Key und speichert eine Datei <code>ImmoAdmin_DB.json</code> in deinem Drive.</p>
-                        </div>
+                        <p class="text-[11px] text-gray-400 mt-3">Google&nbsp;Drive-Upload findest du im Tab <strong>Google Drive</strong>.</p>
                     </div>
 
                     <div class="bg-white p-6 rounded-lg shadow-sm border border-green-100 flex flex-col justify-between">
@@ -118,8 +139,58 @@ window.ImmoApp.settings = {
                     </div>
 
                 </div>
+                </div>
 
-                <div class="mt-8 bg-gray-50 p-6 rounded-lg shadow-sm border border-gray-200">
+                <div id="settings-panel-google" class="settings-subpanel mb-2 hidden">
+                    <div class="bg-white p-6 rounded-lg shadow-sm border border-indigo-100 flex flex-col justify-between max-w-3xl">
+                        <div>
+                            <h3 class="text-lg font-bold text-indigo-800 mb-2">🔑 Google API &amp; Drive</h3>
+                            <p class="text-sm text-gray-600 mb-4 border-b pb-4">
+                                Nur nötig, wenn du verschlüsselte Backups mit Google&nbsp;Drive nutzen willst. Die Werte bleiben im Browser (localStorage / IndexedDB), nicht auf einem fremden Server.
+                            </p>
+
+                            <div class="space-y-3 mb-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">OAuth Client ID</label>
+                                    <input type="text" id="google-client-id" class="w-full border rounded p-2 text-xs bg-gray-50 font-mono" placeholder="1234567890-abc.apps.googleusercontent.com">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+                                    <input type="text" id="google-api-key" class="w-full border rounded p-2 text-xs bg-gray-50 font-mono" placeholder="AIzaSy...">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Drive-Ordner (optional)</label>
+                                    <input type="text" id="google-drive-folder" class="w-full border rounded p-2 text-xs bg-gray-50" placeholder="z.B. ImmoAdmin-Daten">
+                                    <p class="text-[11px] text-gray-400 mt-1">
+                                        Optionaler Zielordner für Dokumente/Backups. Wenn leer, speichert die App im Standardbereich von Drive.
+                                    </p>
+                                </div>
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" id="doc-auto-upload" class="w-4 h-4 text-indigo-600 rounded">
+                                    <span class="text-sm text-gray-700">Dokumente (DOCX) nach Erstellung automatisch zu Drive hochladen</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <button onclick="ImmoApp.settings.saveGoogleConfig()" class="bg-indigo-600 text-white px-4 py-3 rounded-lg shadow font-bold w-full hover:bg-indigo-700 transition flex justify-center items-center gap-2">
+                            <span>💾</span> Google-Konfiguration speichern
+                        </button>
+
+                        <div class="mt-6 space-y-2 border-t border-indigo-100 pt-4">
+                            <h4 class="text-sm font-bold text-indigo-800 mb-1">🌥️ Google Drive Sync (Beta)</h4>
+                            <button onclick="ImmoApp.settings.syncToDrive()" class="w-full bg-indigo-600 text-white px-3 py-2 rounded-lg text-sm font-bold hover:bg-indigo-700 flex items-center justify-center gap-2">
+                                <span>⬆️</span><span>Mit Drive synchronisieren</span>
+                            </button>
+                            <button onclick="ImmoApp.settings.syncFromDrive()" class="w-full bg-indigo-50 text-indigo-800 px-3 py-2 rounded-lg text-sm font-bold hover:bg-indigo-100 flex items-center justify-center gap-2">
+                                <span>⬇️</span><span>Von Drive laden</span>
+                            </button>
+                            <p class="text-[11px] text-gray-400">Speichert <code>ImmoAdmin_DB.json</code> in deinem Drive (nutzt OAuth Client ID / API Key oben).</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="settings-panel-brief" class="settings-subpanel mb-2 hidden">
+                <div class="bg-gray-50 p-6 rounded-lg shadow-sm border border-gray-200">
                     <h3 class="text-lg font-bold text-gray-800 mb-2">📋 Absender für Anschreiben & NK-Abrechnung</h3>
                     <p class="text-sm text-gray-600 mb-4">Diese Daten erscheinen im Briefkopf und bei Zahlungshinweisen (z.B. IBAN).</p>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -171,8 +242,10 @@ window.ImmoApp.settings = {
                     </div>
                     <button onclick="ImmoApp.settings.saveSenderConfig()" class="bg-gray-700 text-white px-4 py-2 rounded font-bold hover:bg-gray-800">Absender speichern</button>
                 </div>
+                </div>
 
-                <div class="mt-8 bg-red-50 p-6 rounded-lg shadow-sm border border-red-200">
+                <div id="settings-panel-danger" class="settings-subpanel mb-2 hidden">
+                <div class="bg-red-50 p-6 rounded-lg shadow-sm border border-red-200">
                     <h3 class="text-lg font-bold text-red-800 mb-2">🚨 Gefahrenzone: Daten gezielt löschen (Reset)</h3>
                     <p class="text-sm text-red-600 mb-4 border-b border-red-200 pb-4">Achtung: Diese Aktionen können nicht rückgängig gemacht werden. Bitte mache vorher ein Backup!</p>
                     
@@ -188,8 +261,158 @@ window.ImmoApp.settings = {
                         </button>
                     </div>
                 </div>
+                </div>
             `;
         }
+    },
+
+    /** Wechselt die Kategorien oben (Server, Backup, Google, …). */
+    switchSettingsTab: function (tab) {
+        const ids = ["server", "backup", "google", "brief", "danger"];
+        ids.forEach(function (t) {
+            const panel = document.getElementById("settings-panel-" + t);
+            const btn = document.getElementById("settings-tab-" + t);
+            if (panel) panel.classList.toggle("hidden", t !== tab);
+            if (btn) {
+                btn.classList.toggle("tab-active", t === tab);
+                if (t === "danger") {
+                    btn.classList.toggle("bg-red-50", t === tab);
+                    btn.classList.toggle("ring-1", t === tab);
+                    btn.classList.toggle("ring-red-200", t === tab);
+                }
+            }
+        });
+        try {
+            localStorage.setItem("immo_settings_subtab", tab);
+        } catch (e) {}
+    },
+
+    fillDockerApiUrl: function() {
+        const el = document.getElementById("api-base-url");
+        if (el) el.value = "http://127.0.0.1:8000";
+    },
+
+    /** Vorschlag: API unter derselben Domain (z. B. nach Deploy von /api). */
+    fillSameOriginApiUrl: function () {
+        const el = document.getElementById("api-base-url");
+        if (!el || !window.location || !window.location.origin) return;
+        var o = String(window.location.origin).replace(/\/+$/, "");
+        el.value = o + "/api";
+    },
+
+    /**
+     * GET /api/v1/health ohne Login (URL aus Feld oder gespeicherter Base-URL).
+     */
+    apiHealthCheck: async function() {
+        const input = document.getElementById("api-base-url");
+        let base = (input && String(input.value).trim()) || (ImmoApp.api && ImmoApp.api.baseUrl) || localStorage.getItem("immo_api_base_url") || "";
+        base = String(base).trim().replace(/\/+$/, "");
+        const out = document.getElementById("api-docker-test-status");
+        const setOut = function(text, ok) {
+            if (!out) return;
+            out.textContent = text;
+            out.className = "text-xs font-mono min-h-[1.25rem] whitespace-pre-wrap break-all " + (ok ? "text-emerald-800" : "text-red-800");
+        };
+        if (!base) {
+            setOut("Bitte API Base URL eintragen oder „URL: Docker (8000)“ wählen.", false);
+            return;
+        }
+        try {
+            const res = await fetch(base + "/api/v1/health", { method: "GET" });
+            const text = await res.text();
+            let msg;
+            try {
+                const j = JSON.parse(text);
+                if (j && j.ok) {
+                    msg = "Health OK – " + (j.version || "v1") + " · " + (j.time || "");
+                } else {
+                    msg = "Antwort: " + text;
+                }
+            } catch (e) {
+                msg = "HTTP " + res.status + ": " + text.slice(0, 200);
+            }
+            setOut(msg, res.ok);
+        } catch (e) {
+            setOut("Fehler: " + (e.message || String(e)) + "\n(Ist Docker gestartet? URL korrekt? App nicht als file:// öffnen.)", false);
+        }
+    },
+
+    loadApiConfig: async function() {
+        const urlEl = document.getElementById("api-base-url");
+        const modeEl = document.getElementById("api-mode-enabled");
+        if (!urlEl || !modeEl || !ImmoApp.api) return;
+        urlEl.value = ImmoApp.api.baseUrl || localStorage.getItem("immo_api_base_url") || "";
+        modeEl.checked = ImmoApp.api.isApiMode ? ImmoApp.api.isApiMode() : false;
+        const dockStat = document.getElementById("api-docker-test-status");
+        if (dockStat) {
+            dockStat.textContent = "";
+            dockStat.className = "text-xs text-slate-600 font-mono min-h-[1.25rem] whitespace-pre-wrap break-all";
+        }
+        await this.refreshApiMeStatus();
+        const expHint = document.getElementById("export-api-hint");
+        if (expHint) {
+            const show = !!(ImmoApp.api.useApiData && ImmoApp.api.useApiData());
+            expHint.classList.toggle("hidden", !show);
+        }
+    },
+
+    refreshApiMeStatus: async function() {
+        const st = document.getElementById("api-me-status");
+        if (!st || !ImmoApp.api) return;
+        if (!ImmoApp.api.getToken()) {
+            st.textContent = "Nicht angemeldet.";
+            return;
+        }
+        try {
+            const me = await ImmoApp.api.me();
+            if (me && me.username) {
+                st.textContent = "Angemeldet als " + me.username + (me.role ? " (" + me.role + ")" : "") + ".";
+            } else {
+                st.textContent = "Token gesetzt, /me ohne Nutzerdaten.";
+            }
+        } catch (e) {
+            st.textContent = "Token ungültig oder Server nicht erreichbar.";
+        }
+    },
+
+    apiLogin: async function() {
+        if (!ImmoApp.api) return;
+        const u = document.getElementById("api-username")?.value?.trim() || "";
+        const p = document.getElementById("api-password")?.value || "";
+        if (!u || !p) {
+            alert("Benutzername und Passwort eingeben.");
+            return;
+        }
+        try {
+            await ImmoApp.api.login(u, p);
+            await this.refreshApiMeStatus();
+            alert("Anmeldung ok.");
+        } catch (e) {
+            alert(e.message || "Login fehlgeschlagen");
+        }
+    },
+
+    apiLogout: async function() {
+        if (!ImmoApp.api) return;
+        try {
+            await ImmoApp.api.logout();
+            await this.refreshApiMeStatus();
+        } catch (e) {
+            ImmoApp.api.setToken("");
+            await this.refreshApiMeStatus();
+        }
+    },
+
+    saveApiConfig: async function() {
+        const url = document.getElementById("api-base-url")?.value || "";
+        const enabled = document.getElementById("api-mode-enabled")?.checked === true;
+        if (!ImmoApp.api) {
+            alert("API-Modul nicht geladen.");
+            return;
+        }
+        ImmoApp.api.setBaseUrl(url);
+        ImmoApp.api.setApiMode(enabled);
+        alert("Server-Konfiguration gespeichert.");
     },
 
     // Google-Konfiguration laden
@@ -344,8 +567,8 @@ window.ImmoApp.settings = {
     buildExportObject: async function() {
         const db = ImmoApp.db.instance;
         const data = {};
-        
-        // Absenderdaten (für Anschreiben/NK-Abrechnung) immer mitsichern
+        const useApi = ImmoApp.api && ImmoApp.api.useApiData();
+
         try {
             if (this.getSenderConfig) {
                 data.senderConfig = await this.getSenderConfig();
@@ -354,31 +577,101 @@ window.ImmoApp.settings = {
             console.warn("Absenderdaten konnten nicht exportiert werden:", e);
         }
 
-        if(document.getElementById('exp-prop').checked) data.properties = await db.properties.toArray();
-        if(document.getElementById('exp-tenant').checked) data.tenants = await db.tenants.toArray();
-        if(document.getElementById('exp-util').checked) data.utilities = await db.utilities.toArray();
-        if(document.getElementById('exp-maint').checked) data.maintenance = await db.maintenance.toArray();
-        // Dokument-Metadaten immer mitsichern (klein, keine großen Binärdaten)
-        if (db.documents) data.documents = await db.documents.toArray();
+        const loadTxsForExport = async function () {
+            if (useApi) {
+                const r = await ImmoApp.api.getTransactions({ limit: 8000 });
+                return (r.data || []).map(ImmoApp.api.mapTransactionFromApi);
+            }
+            return await db.transactions.toArray();
+        };
 
-        // Kontoauszüge ODER intelligentes KI-Wissen extrahieren
-        if(document.getElementById('exp-tx').checked) {
-            data.transactions = await db.transactions.toArray();
-        } else if(document.getElementById('exp-ki') && document.getElementById('exp-ki').checked) {
-            const allTxs = await db.transactions.toArray();
+        if (document.getElementById("exp-prop").checked) {
+            if (useApi) {
+                const r = await ImmoApp.api.getProperties({ limit: 5000 });
+                data.properties = (r.data || []).map(ImmoApp.api.mapPropertyFromApi);
+            } else {
+                data.properties = await db.properties.toArray();
+            }
+        }
+        if (document.getElementById("exp-tenant").checked) {
+            if (useApi) {
+                const r = await ImmoApp.api.getTenants({ limit: 5000 });
+                data.tenants = (r.data || []).map(ImmoApp.api.mapTenantFromApi);
+            } else {
+                data.tenants = await db.tenants.toArray();
+            }
+        }
+        if (document.getElementById("exp-util").checked) {
+            if (useApi) {
+                const r = await ImmoApp.api.getUtilities({ limit: 5000 });
+                data.utilities = (r.data || []).map(ImmoApp.api.mapUtilityFromApi);
+            } else {
+                data.utilities = await db.utilities.toArray();
+            }
+        }
+        if (document.getElementById("exp-maint").checked) {
+            if (useApi) {
+                const r = await ImmoApp.api.getMaintenance({ limit: 5000 });
+                data.maintenance = (r.data || []).map(ImmoApp.api.mapMaintenanceFromApi);
+            } else {
+                data.maintenance = await db.maintenance.toArray();
+            }
+        }
+
+        const expMeterEl = document.getElementById("exp-meter");
+        if (expMeterEl && expMeterEl.checked) {
+            try {
+                if (useApi) {
+                    const [mr, tr, rr] = await Promise.all([
+                        ImmoApp.api.getMeters({ limit: 5000 }),
+                        ImmoApp.api.getTariffs({ limit: 5000 }),
+                        ImmoApp.api.getMeterReadings({ limit: 20000 })
+                    ]);
+                    data.meters = (mr.data || []).map(ImmoApp.api.mapMeterFromApi);
+                    data.tariffs = (tr.data || []).map(ImmoApp.api.mapTariffFromApi);
+                    data.meterReadings = (rr.data || []).map(ImmoApp.api.mapMeterReadingFromApi);
+                } else {
+                    data.meters = await db.meters.toArray();
+                    data.tariffs = await db.tariffs.toArray();
+                    data.meterReadings = await db.meterReadings.toArray();
+                }
+            } catch (e) {
+                console.warn("Zähler/Tarife/Ablesungen Export:", e);
+            }
+        }
+
+        try {
+            if (useApi) {
+                const r = await ImmoApp.api.getDocuments({ limit: 5000 });
+                data.documents = (r.data || []).map(ImmoApp.api.mapDocumentFromApi);
+            } else if (db.documents) {
+                data.documents = await db.documents.toArray();
+            }
+        } catch (e) {
+            console.warn("Dokumente export:", e);
+        }
+
+        if (document.getElementById("exp-tx").checked) {
+            data.transactions = await loadTxsForExport();
+        } else if (document.getElementById("exp-ki") && document.getElementById("exp-ki").checked) {
+            const allTxs = await loadTxsForExport();
             const kiData = [];
             const seen = new Set();
-            
-            allTxs.forEach(tx => {
-                if(tx.category === 'UTILITY' || tx.category === 'IGNORE') {
-                    const name = (tx.name || '').trim().toLowerCase();
-                    if(name && !seen.has(name)) {
+            allTxs.forEach(function (tx) {
+                if (tx.category === "UTILITY" || tx.category === "IGNORE") {
+                    const name = (tx.name || "").trim().toLowerCase();
+                    if (name && !seen.has(name)) {
                         seen.add(name);
                         kiData.push({
-                            date: '01.01.2000', year: '2000', amount: 0,
-                            name: tx.name, purpose: '🤖 KI-Gedächtnis (Auto-Zuordnung)',
-                            category: tx.category, iban: '', matchedTenantId: null,
-                            importBatchId: 'ki_memory'
+                            date: "01.01.2000",
+                            year: "2000",
+                            amount: 0,
+                            name: tx.name,
+                            purpose: "🤖 KI-Gedächtnis (Auto-Zuordnung)",
+                            category: tx.category,
+                            iban: "",
+                            matchedTenantId: null,
+                            importBatchId: "ki_memory"
                         });
                     }
                 }
@@ -406,8 +699,26 @@ window.ImmoApp.settings = {
 
     importFromObject: async function(data) {
         const db = ImmoApp.db.instance;
+        const hasEntityPayload = !!(
+            (data.properties && data.properties.length > 0)
+            || (data.tenants && data.tenants.length > 0)
+            || (data.transactions && data.transactions.length > 0)
+            || (data.utilities && data.utilities.length > 0)
+            || (data.maintenance && data.maintenance.length > 0)
+            || (data.documents && data.documents.length > 0)
+            || (data.meters && data.meters.length > 0)
+            || (data.tariffs && data.tariffs.length > 0)
+            || (data.meterReadings && data.meterReadings.length > 0)
+        );
+        if (hasEntityPayload && ImmoApp.api && ImmoApp.api.useApiData()) {
+            if (!confirm(
+                "Hinweis: API-Modus ist aktiv. Dieser Import landet nur in der lokalen Browser-Datenbank (IndexedDB), nicht auf dem API-Server.\n\nTrotzdem fortfahren?"
+            )) {
+                return;
+            }
+        }
         let msg = "Folgende Daten wurden erfolgreich importiert:\n\n";
-                
+
         // Absenderdaten (falls vorhanden) wiederherstellen
         if (data.senderConfig && typeof data.senderConfig === "object") {
             const sc = data.senderConfig || {};
@@ -446,6 +757,18 @@ window.ImmoApp.settings = {
         if (data.documents && data.documents.length > 0 && db.documents) {
             await db.documents.bulkPut(data.documents);
             msg += `✅ ${data.documents.length} Dokument-Metadaten\n`;
+        }
+        if (data.meters && data.meters.length > 0) {
+            await db.meters.bulkPut(data.meters);
+            msg += `✅ ${data.meters.length} Zähler\n`;
+        }
+        if (data.tariffs && data.tariffs.length > 0) {
+            await db.tariffs.bulkPut(data.tariffs);
+            msg += `✅ ${data.tariffs.length} Tarife\n`;
+        }
+        if (data.meterReadings && data.meterReadings.length > 0) {
+            await db.meterReadings.bulkPut(data.meterReadings);
+            msg += `✅ ${data.meterReadings.length} Zählerablesungen\n`;
         }
         alert(msg + "\nDie App wird nun neu geladen, um die Änderungen anzuzeigen.");
         location.reload();
@@ -790,9 +1113,6 @@ window.ImmoApp.settings = {
     },
 
     registerDocumentMetadata: async function(payload = {}) {
-        const db = ImmoApp.db.instance;
-        if (!db || !db.documents) return null;
-
         const record = {
             tenantId: payload.tenantId || null,
             propertyId: payload.propertyId || null,
@@ -812,7 +1132,33 @@ window.ImmoApp.settings = {
             createdBy: payload.createdBy || "local-user"
         };
 
-        // Duplikate vermeiden: gleicher Typ + Zeitraum + checksum + tenant
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            try {
+                const apiBody = ImmoApp.api.documentRecordToCreateBody(record);
+                if (record.checksum && record.tenantId) {
+                    const ex = await ImmoApp.api.findDocumentDuplicateForTenant(
+                        record.tenantId,
+                        record.docType,
+                        record.checksum,
+                        record.periodStart || "",
+                        record.periodEnd || ""
+                    );
+                    if (ex) {
+                        await ImmoApp.api.patchDocument(ex.id, apiBody);
+                        return ex.id;
+                    }
+                }
+                const res = await ImmoApp.api.postDocument(apiBody);
+                return res?.data?.id != null ? res.data.id : null;
+            } catch (e) {
+                console.warn("API registerDocumentMetadata:", e);
+                return null;
+            }
+        }
+
+        const db = ImmoApp.db.instance;
+        if (!db || !db.documents) return null;
+
         if (record.checksum) {
             const existing = await db.documents
                 .where("tenantId")
@@ -828,14 +1174,27 @@ window.ImmoApp.settings = {
     },
 
     getDocumentsForTenant: async function(tenantId) {
+        if (!tenantId) return [];
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            try {
+                const res = await ImmoApp.api.getDocumentsByTenant(tenantId);
+                const rows = (res.data || []).map(ImmoApp.api.mapDocumentFromApi);
+                rows.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+                return rows;
+            } catch (e) {
+                console.warn("getDocumentsForTenant API:", e);
+                return [];
+            }
+        }
         const db = ImmoApp.db.instance;
-        if (!db || !db.documents || !tenantId) return [];
+        if (!db || !db.documents) return [];
         const rows = await db.documents.where("tenantId").equals(parseInt(tenantId, 10)).toArray();
         rows.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
         return rows;
     },
 
     pruneDocumentLocalCache: async function(maxEntries = 30) {
+        if (ImmoApp.api && ImmoApp.api.useApiData()) return;
         const db = ImmoApp.db.instance;
         if (!db || !db.documents) return;
         const all = await db.documents.toArray();
@@ -887,7 +1246,10 @@ window.ImmoApp.settings = {
             });
             console.log("Drive Upload Ergebnis:", response);
             this._driveState.lastSyncAt = new Date();
-            alert("Backup wurde erfolgreich nach Google Drive hochgeladen.");
+            const apiNote = (ImmoApp.api && ImmoApp.api.useApiData())
+                ? " Der API-Server wurde dabei nicht verändert."
+                : "";
+            alert("Backup wurde erfolgreich nach Google Drive hochgeladen." + apiNote);
         } catch (e) {
             console.error("Fehler beim Hochladen zu Drive", e);
             alert("Fehler beim Hochladen zu Google Drive. Details in der Konsole.");
@@ -931,7 +1293,10 @@ window.ImmoApp.settings = {
                 return;
             }
 
-            if (!confirm("Backup von Google Drive laden und in die lokale Datenbank importieren? Bereits vorhandene Einträge mit gleicher ID werden überschrieben.")) {
+            const driveApiNote = (ImmoApp.api && ImmoApp.api.useApiData())
+                ? "\n\nHinweis: API-Modus ist aktiv. Der Import landet nur in der lokalen IndexedDB, nicht auf dem API-Server."
+                : "";
+            if (!confirm("Backup von Google Drive laden und in die lokale Datenbank importieren? Bereits vorhandene Einträge mit gleicher ID werden überschrieben." + driveApiNote)) {
                 return;
             }
             await this.importFromObject(data);
@@ -942,7 +1307,10 @@ window.ImmoApp.settings = {
     },
 
     clearTable: async function(tableName, displayName) {
-        if(confirm(`🚨 WARNUNG: Möchtest du wirklich "${displayName}" endgültig aus der Datenbank löschen?\n\nDies kann nicht rückgängig gemacht werden!`)) {
+        const apiLocal = (ImmoApp.api && ImmoApp.api.useApiData())
+            ? "\n\nHinweis: API-Modus aktiv – gelöscht wird nur die lokale IndexedDB, nicht der Server."
+            : "";
+        if (confirm(`🚨 WARNUNG: Möchtest du wirklich "${displayName}" endgültig aus der Datenbank löschen?\n\nDies kann nicht rückgängig gemacht werden!${apiLocal}`)) {
             await ImmoApp.db.instance[tableName].clear();
             alert(`Erfolgreich gelöscht: ${displayName}`);
             this.render();
@@ -950,7 +1318,10 @@ window.ImmoApp.settings = {
     },
 
     clearAll: async function() {
-        if(confirm("🚨 ACHTUNG: Du bist dabei, ALLES zu löschen! (Objekte, Mieter, Kontoauszüge, Notizen).\n\nMöchtest du die App wirklich komplett auf Werkseinstellungen zurücksetzen?")) {
+        const apiLocal = (ImmoApp.api && ImmoApp.api.useApiData())
+            ? "\n\nHinweis: API-Modus aktiv – geleert wird nur die lokale IndexedDB, der Server bleibt unverändert."
+            : "";
+        if (confirm("🚨 ACHTUNG: Du bist dabei, ALLES zu löschen! (Objekte, Mieter, Kontoauszüge, Notizen).\n\nMöchtest du die App wirklich komplett auf Werkseinstellungen zurücksetzen?" + apiLocal)) {
             const db = ImmoApp.db.instance;
             await Promise.all([
                 db.properties.clear(),
@@ -967,7 +1338,10 @@ window.ImmoApp.settings = {
 
     render: async function() {
         this.setupHTML();
+        await this.loadApiConfig();
         await this.loadGoogleConfig();
         await this.loadSenderConfig();
+        var sub = localStorage.getItem("immo_settings_subtab") || "server";
+        this.switchSettingsTab(sub);
     }
 };

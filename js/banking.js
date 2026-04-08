@@ -108,6 +108,41 @@ window.ImmoApp.banking = {
         this.render();
     },
 
+    _getTx: async function (txId) {
+        const id = parseInt(String(txId), 10);
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            const row = await ImmoApp.api.getTransaction(id);
+            return row ? ImmoApp.api.mapTransactionFromApi(row) : null;
+        }
+        return ImmoApp.db.instance.transactions.get(id);
+    },
+
+    _loadTenantsBanking: async function () {
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            const res = await ImmoApp.api.getTenants({ limit: 500 });
+            return (res.data || []).map(ImmoApp.api.mapTenantFromApi);
+        }
+        return ImmoApp.db.instance.tenants.toArray();
+    },
+
+    _loadTxsForYear: async function (currentYear) {
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            const res = await ImmoApp.api.getTransactions({ limit: 8000, page: 1 });
+            return (res.data || [])
+                .map(ImmoApp.api.mapTransactionFromApi)
+                .filter(function (tx) { return String(tx.year) === String(currentYear); });
+        }
+        return ImmoApp.db.instance.transactions.where("year").equals(currentYear).toArray();
+    },
+
+    _loadAllTxsBanking: async function () {
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            const res = await ImmoApp.api.getTransactions({ limit: 8000, page: 1 });
+            return (res.data || []).map(ImmoApp.api.mapTransactionFromApi);
+        }
+        return ImmoApp.db.instance.transactions.toArray();
+    },
+
     importCSV: async function() {
         const fileInput = document.getElementById('csv-upload');
         if (!fileInput.files.length) return alert("Bitte wähle zuerst eine CSV-Datei aus!");
@@ -120,7 +155,21 @@ window.ImmoApp.banking = {
         reader.onload = async function(e) {
             const text = e.target.result;
             const db = ImmoApp.db.instance;
-            
+            const useApi = ImmoApp.api && ImmoApp.api.useApiData();
+            let existingKeys = new Set();
+            if (useApi) {
+                try {
+                    const res = await ImmoApp.api.getTransactions({ limit: 8000 });
+                    (res.data || []).forEach(function (row) {
+                        const t = ImmoApp.api.mapTransactionFromApi(row);
+                        existingKeys.add((t.date || "") + "|" + t.amount + "|" + (t.name || ""));
+                    });
+                } catch (err) {
+                    alert(err.message || "API");
+                    return;
+                }
+            }
+
             const rows = [];
             let currentRow = [];
             let currentCell = '';
@@ -216,13 +265,37 @@ window.ImmoApp.banking = {
                 let iban = (ibanIdx > -1 && cols[ibanIdx]) ? cols[ibanIdx].replace(/\s+/g, '') : '';
                 let purpose = (purposeIdx > -1 && cols[purposeIdx]) ? cols[purposeIdx].replace(/[\r\n]+/g, ' ') : '';
 
-                const exists = await db.transactions.where({date: date, amount: amount, name: name}).count();
-                if (exists === 0) {
-                    await db.transactions.add({
-                        date, name, iban, purpose, amount, 
-                        category: 'UNMATCHED', matchedTenantId: null, year: currentYear, importBatchId: batchId
-                    });
-                    count++;
+                const dupKey = date + "|" + amount + "|" + name;
+                if (useApi) {
+                    if (existingKeys.has(dupKey)) continue;
+                    const iso = ImmoApp.api.germanDateToIso(date);
+                    if (!iso) continue;
+                    try {
+                        await ImmoApp.api.postTransaction({
+                            tenant_id: null,
+                            date_value: iso,
+                            amount: amount,
+                            purpose: purpose || null,
+                            name: name || null,
+                            iban: iban || null,
+                            category: "UNMATCHED",
+                            year_value: String(currentYear),
+                            import_batch_id: batchId
+                        });
+                        existingKeys.add(dupKey);
+                        count++;
+                    } catch (err) {
+                        console.error(err);
+                    }
+                } else {
+                    const exists = await db.transactions.where({ date: date, amount: amount, name: name }).count();
+                    if (exists === 0) {
+                        await db.transactions.add({
+                            date: date, name: name, iban: iban, purpose: purpose, amount: amount,
+                            category: "UNMATCHED", matchedTenantId: null, year: currentYear, importBatchId: batchId
+                        });
+                        count++;
+                    }
                 }
             }
             alert(`${count} neue Buchungen für das Jahr ${currentYear} sauber importiert!`);
@@ -233,7 +306,19 @@ window.ImmoApp.banking = {
 
     deleteAllTxs: async function() {
         if(confirm("ACHTUNG: Willst du WIRKLICH alle bisher importierten Kontoauszüge löschen?\n\n(Deine Mieter, Objekte und Notizen bleiben erhalten. Du kannst danach deine CSV sauber neu importieren!)")) {
-            await ImmoApp.db.instance.transactions.clear();
+            try {
+                if (ImmoApp.api && ImmoApp.api.useApiData()) {
+                    const res = await ImmoApp.api.getTransactions({ limit: 20000 });
+                    for (const row of res.data || []) {
+                        await ImmoApp.api.deleteTransaction(row.id);
+                    }
+                } else {
+                    await ImmoApp.db.instance.transactions.clear();
+                }
+            } catch (e) {
+                alert(e.message || "Löschen fehlgeschlagen");
+                return;
+            }
             this.render();
             if(window.ImmoApp.dashboard) ImmoApp.dashboard.render();
             alert("Alle Buchungen wurden gelöscht. Du kannst jetzt sauber neu importieren!");
@@ -243,9 +328,18 @@ window.ImmoApp.banking = {
     // 🤖 DIE NEUE LERNFÄHIGE KI-FUNKTION
     runAutoMatch: async function() {
         const db = ImmoApp.db.instance;
-        const txs = await db.transactions.where('category').equals('UNMATCHED').toArray();
-        const allTxs = await db.transactions.toArray(); // Holt ALLE jemals erfassten Buchungen als Lern-Basis
-        const tenants = await db.tenants.toArray();
+        let txs;
+        let allTxs;
+        let tenants;
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            allTxs = await this._loadAllTxsBanking();
+            txs = allTxs.filter(function (t) { return t.category === "UNMATCHED"; });
+            tenants = await this._loadTenantsBanking();
+        } else {
+            txs = await db.transactions.where("category").equals("UNMATCHED").toArray();
+            allTxs = await db.transactions.toArray();
+            tenants = await db.tenants.toArray();
+        }
         let matchCount = 0;
 
         // 1. LERN-DATENBANK AUFBAUEN
@@ -327,42 +421,91 @@ window.ImmoApp.banking = {
     // Die Update Funktion wurde angepasst, damit sie mit dem schnellen KI-Loop funktioniert
     updateCategory: async function(txId, category, tenantId = null, skipRender = false) {
         const db = ImmoApp.db.instance;
-        const tx = await db.transactions.get(txId);
-        
+        const tx = await this._getTx(txId);
+        if (!tx) {
+            alert("Buchung nicht gefunden.");
+            return;
+        }
         const oldCategory = tx.category;
 
-        await db.transactions.update(txId, { 
-            category: category, 
-            matchedTenantId: tenantId ? parseInt(tenantId) : null 
-        });
-
-        // Wenn es als Nebenkosten markiert wird, spiegeln wir es ins Utilities-Modul rüber
-        if (category === 'UTILITY') {
-            const exists = await db.utilities.where({ name: tx.name + ' - ' + tx.purpose, amount: Math.abs(tx.amount) }).count();
-            if (exists === 0) {
-                await db.utilities.add({
-                    name: tx.name + ' - ' + tx.purpose,
-                    amount: Math.abs(tx.amount), // Nebenkosten sind in der Ansicht meist positiv
-                    year: tx.year,
-                    propertyId: null // Muss der Nutzer im Utilities-Tab noch zuweisen
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            try {
+                await ImmoApp.api.patchTransaction(txId, {
+                    category: String(category).toUpperCase(),
+                    tenant_id: tenantId ? parseInt(String(tenantId), 10) : null
                 });
+            } catch (e) {
+                alert(e.message || "API");
+                return;
+            }
+
+            const utilName = (tx.name || "") + " - " + (tx.purpose || "");
+            const utilAmount = Math.abs(Number(tx.amount) || 0);
+            const yearStr = String(tx.year != null ? tx.year : "");
+
+            const findApiUtilityMatches = async function () {
+                const res = await ImmoApp.api.getUtilities({ limit: 5000 });
+                return (res.data || []).filter(function (r) {
+                    return r.name === utilName
+                        && Math.abs(Number(r.amount) - utilAmount) < 0.005
+                        && String(r.year_value) === yearStr;
+                });
+            };
+
+            if (String(category).toUpperCase() === "UTILITY" && yearStr !== "") {
+                const matches = await findApiUtilityMatches();
+                if (matches.length === 0) {
+                    await ImmoApp.api.postUtility({
+                        name: utilName,
+                        amount: utilAmount,
+                        year_value: yearStr,
+                        property_id: null,
+                        category: null,
+                        split_key: null
+                    });
+                }
+            }
+
+            if (String(oldCategory).toUpperCase() === "UTILITY" && String(category).toUpperCase() !== "UTILITY" && yearStr !== "") {
+                const candidates = await findApiUtilityMatches();
+                for (const u of candidates) {
+                    try {
+                        await ImmoApp.api.deleteUtility(u.id);
+                    } catch (err) {
+                        console.warn("Nebenkosten-Spiegel nicht gelöscht (z. B. nur ADMIN):", err);
+                    }
+                }
+            }
+        } else {
+            await db.transactions.update(txId, {
+                category: category,
+                matchedTenantId: tenantId ? parseInt(tenantId) : null
+            });
+
+            if (category === "UTILITY") {
+                const exists = await db.utilities.where({ name: tx.name + " - " + tx.purpose, amount: Math.abs(tx.amount) }).count();
+                if (exists === 0) {
+                    await db.utilities.add({
+                        name: tx.name + " - " + tx.purpose,
+                        amount: Math.abs(tx.amount),
+                        year: tx.year,
+                        propertyId: null
+                    });
+                }
+            }
+
+            if (oldCategory === "UTILITY" && category !== "UTILITY") {
+                const candidates = await db.utilities.where({
+                    name: tx.name + " - " + tx.purpose,
+                    amount: Math.abs(tx.amount),
+                    year: tx.year
+                }).toArray();
+                for (const u of candidates) {
+                    await db.utilities.delete(u.id);
+                }
             }
         }
 
-        // Wenn eine Buchung vorher als Nebenkosten lief und jetzt nicht mehr,
-        // sollten wir den dazugehörigen Utilities-Eintrag wieder entfernen
-        if (oldCategory === 'UTILITY' && category !== 'UTILITY') {
-            const candidates = await db.utilities.where({
-                name: tx.name + ' - ' + tx.purpose,
-                amount: Math.abs(tx.amount),
-                year: tx.year
-            }).toArray();
-            for (const u of candidates) {
-                await db.utilities.delete(u.id);
-            }
-        }
-
-        // Falls es aus dem Auto-Match kommt, rendern wir erst ganz am Ende 1x, um Ruckler zu vermeiden!
         if (!skipRender) {
             this.render();
             if(window.ImmoApp.dashboard) ImmoApp.dashboard.render();
@@ -371,7 +514,16 @@ window.ImmoApp.banking = {
 
     deleteTx: async function(id) {
         if(confirm("Buchung wirklich löschen?")) {
-            await ImmoApp.db.instance.transactions.delete(id);
+            try {
+                if (ImmoApp.api && ImmoApp.api.useApiData()) {
+                    await ImmoApp.api.deleteTransaction(id);
+                } else {
+                    await ImmoApp.db.instance.transactions.delete(id);
+                }
+            } catch (e) {
+                alert(e.message || "Löschen fehlgeschlagen");
+                return;
+            }
             this.render();
             if(window.ImmoApp.dashboard) ImmoApp.dashboard.render();
         }
@@ -382,7 +534,25 @@ window.ImmoApp.banking = {
             alert("Bitte Datum im Format TT.MM.JJ oder TT.MM.JJJJ eingeben.");
             return;
         }
-        await ImmoApp.db.instance.transactions.update(txId, { date: newDateStr.trim() });
+        const trimmed = newDateStr.trim();
+        try {
+            if (ImmoApp.api && ImmoApp.api.useApiData()) {
+                const iso = ImmoApp.api.germanDateToIso(trimmed);
+                if (!iso) {
+                    alert("Ungültiges Datum.");
+                    return;
+                }
+                await ImmoApp.api.patchTransaction(txId, {
+                    date_value: iso,
+                    year_value: iso.substring(0, 4)
+                });
+            } else {
+                await ImmoApp.db.instance.transactions.update(txId, { date: trimmed });
+            }
+        } catch (e) {
+            alert(e.message || "Speichern fehlgeschlagen");
+            return;
+        }
         this.render();
         if (window.ImmoApp.dashboard) ImmoApp.dashboard.render();
     },
@@ -397,8 +567,7 @@ window.ImmoApp.banking = {
     },
 
     createTenantFromTx: async function(txId) {
-        const db = ImmoApp.db.instance;
-        const tx = await db.transactions.get(txId);
+        const tx = await this._getTx(txId);
         if (!tx) return alert("Buchung nicht gefunden.");
         if (!ImmoApp.tenants || !ImmoApp.tenants.showTenantModal) {
             alert("Mietermodul ist nicht geladen.");
@@ -418,7 +587,7 @@ window.ImmoApp.banking = {
 
     splitToDepositAndRent: async function(txId) {
         const db = ImmoApp.db.instance;
-        const tx = await db.transactions.get(txId);
+        const tx = await this._getTx(txId);
         if (!tx) return alert("Buchung nicht gefunden.");
         if (tx.amount <= 0) return alert("Nur Zahlungseingänge können gesplittet werden.");
 
@@ -431,34 +600,57 @@ window.ImmoApp.banking = {
         }
         const rentPart = tx.amount - dep;
 
-        // Kaution
-        await db.transactions.add({
-            date: tx.date,
-            amount: dep,
-            name: tx.name,
-            purpose: (tx.purpose || '') + ' (Kaution)',
-            iban: tx.iban,
-            matchedTenantId: tx.matchedTenantId || null,
-            category: 'DEPOSIT',
-            year: tx.year,
-            importBatchId: (tx.importBatchId || 'split') + '_deposit'
-        });
+        try {
+            if (ImmoApp.api && ImmoApp.api.useApiData()) {
+                const tid = tx.matchedTenantId != null ? Number(tx.matchedTenantId) : null;
+                const iso = ImmoApp.api.germanDateToIso(tx.date);
+                if (!iso) throw new Error("Ungültiges Datum");
+                const y = String(tx.year || "");
+                const base = { tenant_id: tid, date_value: iso, name: tx.name || null, iban: tx.iban || null, year_value: y };
+                await ImmoApp.api.postTransaction(Object.assign({}, base, {
+                    amount: dep,
+                    purpose: (tx.purpose || "") + " (Kaution)",
+                    category: "DEPOSIT",
+                    import_batch_id: (tx.importBatchId || "split") + "_deposit"
+                }));
+                await ImmoApp.api.postTransaction(Object.assign({}, base, {
+                    amount: rentPart,
+                    purpose: (tx.purpose || "") + " (Miete)",
+                    category: "RENT",
+                    import_batch_id: (tx.importBatchId || "split") + "_rent"
+                }));
+                await ImmoApp.api.patchTransaction(txId, { category: "IGNORE", tenant_id: null });
+            } else {
+                await db.transactions.add({
+                    date: tx.date,
+                    amount: dep,
+                    name: tx.name,
+                    purpose: (tx.purpose || '') + ' (Kaution)',
+                    iban: tx.iban,
+                    matchedTenantId: tx.matchedTenantId || null,
+                    category: 'DEPOSIT',
+                    year: tx.year,
+                    importBatchId: (tx.importBatchId || 'split') + '_deposit'
+                });
 
-        // Miete
-        await db.transactions.add({
-            date: tx.date,
-            amount: rentPart,
-            name: tx.name,
-            purpose: (tx.purpose || '') + ' (Miete)',
-            iban: tx.iban,
-            matchedTenantId: tx.matchedTenantId || null,
-            category: 'RENT',
-            year: tx.year,
-            importBatchId: (tx.importBatchId || 'split') + '_rent'
-        });
+                await db.transactions.add({
+                    date: tx.date,
+                    amount: rentPart,
+                    name: tx.name,
+                    purpose: (tx.purpose || '') + ' (Miete)',
+                    iban: tx.iban,
+                    matchedTenantId: tx.matchedTenantId || null,
+                    category: 'RENT',
+                    year: tx.year,
+                    importBatchId: (tx.importBatchId || 'split') + '_rent'
+                });
 
-        // Ursprüngliche Zahlung ignorieren, damit sie nicht doppelt gezählt wird
-        await db.transactions.update(txId, { category: 'IGNORE', matchedTenantId: null });
+                await db.transactions.update(txId, { category: 'IGNORE', matchedTenantId: null });
+            }
+        } catch (e) {
+            alert(e.message || "Split fehlgeschlagen");
+            return;
+        }
 
         this.render();
         if (window.ImmoApp.dashboard) ImmoApp.dashboard.render();
@@ -472,8 +664,19 @@ window.ImmoApp.banking = {
         const filterText = (document.getElementById("banking-text-filter")?.value || "").toLowerCase();
         const filterStatus = document.getElementById("banking-status-filter")?.value || "ALL";
 
-        let txs = await db.transactions.where('year').equals(currentYear).toArray();
-        const tenants = await db.tenants.toArray();
+        let txs;
+        let tenants;
+        try {
+            txs = await this._loadTxsForYear(currentYear);
+            tenants = await this._loadTenantsBanking();
+        } catch (e) {
+            const tbody = document.getElementById("banking-table-body");
+            const cardsContainer = document.getElementById("banking-cards");
+            const msg = e.message || "Laden fehlgeschlagen";
+            if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-red-600">' + msg + "</td></tr>";
+            if (cardsContainer) cardsContainer.innerHTML = "";
+            return;
+        }
 
         if (filterStatus !== "ALL") txs = txs.filter(tx => tx.category === filterStatus);
         if (filterText) {

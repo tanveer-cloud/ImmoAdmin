@@ -207,6 +207,26 @@ window.ImmoApp.utilities = {
         await db.settings.put({ key: "utilityAssignmentRules", value: JSON.stringify(rules) });
     },
 
+    _useApiData: function () {
+        return !!(ImmoApp.api && ImmoApp.api.useApiData());
+    },
+
+    _loadProperties: async function () {
+        if (this._useApiData()) {
+            const r = await ImmoApp.api.getProperties({ limit: 500 });
+            return (r.data || []).map(ImmoApp.api.mapPropertyFromApi);
+        }
+        return await ImmoApp.db.instance.properties.toArray();
+    },
+
+    _loadAllUtilitiesMapped: async function () {
+        if (this._useApiData()) {
+            const r = await ImmoApp.api.getUtilities({ limit: 5000 });
+            return (r.data || []).map(ImmoApp.api.mapUtilityFromApi);
+        }
+        return await ImmoApp.db.instance.utilities.toArray();
+    },
+
     applyRulesToUtility: async function(u) {
         const namePart = (u.name || "").split(' - ')[0].trim() || (u.name || "").trim();
         if (!namePart) return u;
@@ -219,7 +239,16 @@ window.ImmoApp.utilities = {
         if ((!u.category || u.category === '') && rule.category) upd.category = rule.category;
         if ((!u.splitKey || u.splitKey === '') && rule.splitKey) upd.splitKey = rule.splitKey;
         if (Object.keys(upd).length) {
-            await db.utilities.update(u.id, upd);
+            if (this._useApiData()) {
+                try {
+                    await ImmoApp.api.patchUtility(u.id, ImmoApp.api.utilityLocalPatchToApiBody(upd));
+                } catch (e) {
+                    alert(e.message || "API: Utility-Update fehlgeschlagen.");
+                    return u;
+                }
+            } else {
+                await db.utilities.update(u.id, upd);
+            }
             u = { ...u, ...upd };
         }
         return u;
@@ -228,14 +257,28 @@ window.ImmoApp.utilities = {
     updateUtil: async function(utilId, field, value) {
         const db = ImmoApp.db.instance;
         let updateData = {};
-        if(field === 'propertyId') updateData.propertyId = value ? parseInt(value) : null;
-        if(field === 'category') updateData.category = value;
-        if(field === 'splitKey') updateData.splitKey = value;
-        await db.utilities.update(utilId, updateData);
-        const util = await db.utilities.get(utilId);
-        if (util && util.name) {
-            const namePart = (util.name || "").split(' - ')[0].trim();
-            await this.saveUtilityAssignmentRule(namePart, updateData);
+        if (field === "propertyId") updateData.propertyId = value ? parseInt(value, 10) : null;
+        if (field === "category") updateData.category = value;
+        if (field === "splitKey") updateData.splitKey = value;
+        try {
+            if (this._useApiData()) {
+                await ImmoApp.api.patchUtility(utilId, ImmoApp.api.utilityLocalPatchToApiBody(updateData));
+                const row = await ImmoApp.api.getUtility(utilId);
+                const util = row ? ImmoApp.api.mapUtilityFromApi(row) : null;
+                if (util && util.name) {
+                    const namePart = (util.name || "").split(" - ")[0].trim();
+                    await this.saveUtilityAssignmentRule(namePart, updateData);
+                }
+            } else {
+                await db.utilities.update(utilId, updateData);
+                const util = await db.utilities.get(utilId);
+                if (util && util.name) {
+                    const namePart = (util.name || "").split(" - ")[0].trim();
+                    await this.saveUtilityAssignmentRule(namePart, updateData);
+                }
+            }
+        } catch (e) {
+            alert(e.message || "Speichern fehlgeschlagen.");
         }
         this.renderCosts();
     },
@@ -257,19 +300,18 @@ window.ImmoApp.utilities = {
             return;
         }
 
-        const amount = parseFloat(amountStr.replace(',', '.'));
+        const amount = parseFloat(amountStr.replace(",", "."));
         if (isNaN(amount) || amount <= 0) {
             alert("Bitte einen gültigen Betrag größer 0 eingeben.");
             return;
         }
 
-        // Datum in deutsches Format TT.MM.JJ/JJJJ umwandeln, falls gesetzt
         let prettyDate = "";
         if (rawDate) {
             const d = new Date(rawDate);
             if (!isNaN(d.getTime())) {
-                const dd = String(d.getDate()).padStart(2, '0');
-                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                const dd = String(d.getDate()).padStart(2, "0");
+                const mm = String(d.getMonth() + 1).padStart(2, "0");
                 const yy = String(d.getFullYear()).slice(-2);
                 prettyDate = `${dd}.${mm}.${yy}`;
             }
@@ -277,16 +319,39 @@ window.ImmoApp.utilities = {
 
         const fullName = prettyDate ? `${name} - ${prettyDate}` : name;
 
-        const newId = await db.utilities.add({
-            name: fullName,
-            amount: amount,
-            year: currentYear,
-            importBatchId: 'manual',
-            propertyId: null
-        });
-        let newUtil = await db.utilities.get(newId);
-        if (newUtil) {
-            newUtil = await this.applyRulesToUtility(newUtil);
+        try {
+            if (this._useApiData()) {
+                const res = await ImmoApp.api.postUtility({
+                    name: fullName,
+                    amount: amount,
+                    year_value: String(currentYear),
+                    property_id: null,
+                    category: null,
+                    split_key: null
+                });
+                const newId = res?.data?.id;
+                if (!newId) throw new Error("API: keine ID nach Erstellen.");
+                const row = await ImmoApp.api.getUtility(newId);
+                let newUtil = row ? ImmoApp.api.mapUtilityFromApi(row) : null;
+                if (newUtil) {
+                    await this.applyRulesToUtility(newUtil);
+                }
+            } else {
+                const newId = await db.utilities.add({
+                    name: fullName,
+                    amount: amount,
+                    year: currentYear,
+                    importBatchId: "manual",
+                    propertyId: null
+                });
+                let newUtil = await db.utilities.get(newId);
+                if (newUtil) {
+                    await this.applyRulesToUtility(newUtil);
+                }
+            }
+        } catch (e) {
+            alert(e.message || "Rechnung konnte nicht gespeichert werden.");
+            return;
         }
 
         if (dateInput) dateInput.value = "";
@@ -299,34 +364,54 @@ window.ImmoApp.utilities = {
     renderCosts: async function() {
         const db = ImmoApp.db.instance;
         const currentYear = ImmoApp.ui.currentYear;
-        
-        const props = await db.properties.toArray();
+
+        let props;
+        let utils;
+        let allTenants;
+        let allTxForYear;
+
+        try {
+            props = await this._loadProperties();
+            let allUtilsRaw = await this._loadAllUtilitiesMapped();
+            utils = allUtilsRaw.filter(function (u) { return String(u.year) === String(currentYear); });
+            for (let i = 0; i < utils.length; i++) {
+                utils[i] = await this.applyRulesToUtility(utils[i]);
+            }
+
+            if (this._useApiData()) {
+                const [tn, tr] = await Promise.all([
+                    ImmoApp.api.getTenants({ limit: 500 }),
+                    ImmoApp.api.getTransactions({ limit: 8000 })
+                ]);
+                allTenants = (tn.data || []).map(ImmoApp.api.mapTenantFromApi);
+                allTxForYear = (tr.data || [])
+                    .map(ImmoApp.api.mapTransactionFromApi)
+                    .filter(function (tx) { return String(tx.year) === String(currentYear); });
+            } else {
+                allTenants = await db.tenants.toArray();
+                allTxForYear = await db.transactions.where("year").equals(currentYear).toArray();
+                utils = utils.filter(function (u) {
+                    if (u.importBatchId === "manual") return true;
+                    return allTxForYear.some(function (tx) {
+                        return tx.category === "UTILITY"
+                            && tx.year === u.year
+                            && Math.abs(tx.amount) === u.amount
+                            && (tx.name + " - " + tx.purpose) === u.name;
+                    });
+                });
+            }
+        } catch (e) {
+            console.error(e);
+            alert(e.message || "Nebenkosten konnten nicht geladen werden.");
+            return;
+        }
+
         const propSelect = document.getElementById("util-prop-select");
         const currentSelection = propSelect.value;
-        
+
         propSelect.innerHTML = `<option value="ALL">-- Alle Objekte / Gesamtübersicht --</option>`;
         props.forEach(p => {
             propSelect.innerHTML += `<option value="${p.id}" ${currentSelection == p.id ? 'selected' : ''}>${p.name}</option>`;
-        });
-
-        let utils = await db.utilities.where('year').equals(currentYear).toArray();
-        for (let i = 0; i < utils.length; i++) {
-            utils[i] = await this.applyRulesToUtility(utils[i]);
-        }
-        let allTenants = await db.tenants.toArray();
-        const allTxForYear = await db.transactions.where('year').equals(currentYear).toArray();
-
-        // Nur solche Utilities berücksichtigen, die noch eine aktive UTILITY-Buchung haben
-        // oder manuell erfasst wurden (importBatchId === 'manual')
-        utils = utils.filter(u => {
-            if (u.importBatchId === 'manual') return true;
-            const hasTx = allTxForYear.some(tx => 
-                tx.category === 'UTILITY' &&
-                tx.year === u.year &&
-                Math.abs(tx.amount) === u.amount &&
-                (tx.name + ' - ' + tx.purpose) === u.name
-            );
-            return hasTx;
         });
 
         // Wenn ein spezielles Objekt gewählt ist, filtere!
@@ -536,8 +621,7 @@ window.ImmoApp.utilities = {
     },
 
     setupExportTab: async function() {
-        const db = ImmoApp.db.instance;
-        const props = await db.properties.toArray();
+        const props = await this._loadProperties();
         const propSelect = document.getElementById("export-prop-select");
         propSelect.innerHTML = `<option value="">-- Bitte wählen --</option>`;
         props.forEach(p => {
@@ -555,9 +639,14 @@ window.ImmoApp.utilities = {
             return;
         }
 
-        const db = ImmoApp.db.instance;
         const currentYear = ImmoApp.ui.currentYear;
-        const tenants = await db.tenants.where('propertyId').equals(parseInt(propId)).toArray();
+        let tenants;
+        if (this._useApiData()) {
+            const r = await ImmoApp.api.getTenants({ limit: 500 });
+            tenants = (r.data || []).map(ImmoApp.api.mapTenantFromApi).filter(t => t.propertyId === parseInt(propId, 10));
+        } else {
+            tenants = await ImmoApp.db.instance.tenants.where("propertyId").equals(parseInt(propId, 10)).toArray();
+        }
         const activeTenants = tenants.filter(t => ImmoApp.utils.getActiveMonthsInYear(t.moveIn, t.moveOut, currentYear) > 0);
 
         tenantSelect.innerHTML = `<option value="">-- Mieter wählen --</option>`;
@@ -580,7 +669,6 @@ window.ImmoApp.utilities = {
             return;
         }
 
-        const db = ImmoApp.db.instance;
         const year = ImmoApp.ui.currentYear;
         const nkStartISO = document.getElementById("nk-period-start")?.value || "";
         const nkEndISO = document.getElementById("nk-period-end")?.value || "";
@@ -598,8 +686,22 @@ window.ImmoApp.utilities = {
         const periodEnd = parseISODate(nkEndISO);
         const usePeriod = !!(periodStart && periodEnd);
 
-        const property = await db.properties.get(propId);
-        const tenants = await db.tenants.where('propertyId').equals(propId).toArray();
+        let property;
+        let tenants;
+        if (this._useApiData()) {
+            try {
+                const prow = await ImmoApp.api.getProperty(propId);
+                property = prow ? ImmoApp.api.mapPropertyFromApi(prow) : null;
+            } catch (e) {
+                property = null;
+            }
+            const tr = await ImmoApp.api.getTenants({ limit: 500 });
+            tenants = (tr.data || []).map(ImmoApp.api.mapTenantFromApi).filter(function (t) { return t.propertyId === propId; });
+        } else {
+            const db = ImmoApp.db.instance;
+            property = await db.properties.get(propId);
+            tenants = await db.tenants.where("propertyId").equals(propId).toArray();
+        }
         const msDay = 24 * 60 * 60 * 1000;
         const activeTenants = usePeriod
             ? tenants.filter(t => {
@@ -647,10 +749,23 @@ window.ImmoApp.utilities = {
             return;
         }
 
-        const db = ImmoApp.db.instance;
         const year = ImmoApp.ui.currentYear;
-        const property = await db.properties.get(propId);
-        const tenants = await db.tenants.where('propertyId').equals(propId).toArray();
+        let property;
+        let tenants;
+        if (this._useApiData()) {
+            try {
+                const prow = await ImmoApp.api.getProperty(propId);
+                property = prow ? ImmoApp.api.mapPropertyFromApi(prow) : null;
+            } catch (e) {
+                property = null;
+            }
+            const tr = await ImmoApp.api.getTenants({ limit: 500 });
+            tenants = (tr.data || []).map(ImmoApp.api.mapTenantFromApi).filter(function (t) { return t.propertyId === propId; });
+        } else {
+            const db = ImmoApp.db.instance;
+            property = await db.properties.get(propId);
+            tenants = await db.tenants.where("propertyId").equals(propId).toArray();
+        }
         const activeTenants = tenants.filter(t => ImmoApp.utils.getActiveMonthsInYear(t.moveIn, t.moveOut, year) > 0);
 
         if (activeTenants.length === 0) {
@@ -688,7 +803,6 @@ window.ImmoApp.utilities = {
                 return;
             }
 
-            const db = ImmoApp.db.instance;
             const currentYear = ImmoApp.ui.currentYear;
 
             const periodStartInput = document.getElementById("nk-period-start")?.value || "";
@@ -731,8 +845,36 @@ window.ImmoApp.utilities = {
             const yearsToInclude = [];
             for(let y = startYear; y <= endYear; y++) yearsToInclude.push(String(y));
 
-            const property = await db.properties.get(propId);
-            const targetTenant = await db.tenants.get(tenantId);
+            let property;
+            let targetTenant;
+            let allUtils;
+            let allTenants;
+            if (this._useApiData()) {
+                const [prow, trow] = await Promise.all([
+                    ImmoApp.api.getProperty(propId),
+                    ImmoApp.api.getTenant(tenantId)
+                ]);
+                property = prow ? ImmoApp.api.mapPropertyFromApi(prow) : null;
+                targetTenant = trow ? ImmoApp.api.mapTenantFromApi(trow) : null;
+                const utilsMapped = await this._loadAllUtilitiesMapped();
+                const yearSet = {};
+                yearsToInclude.forEach(function (ys) { yearSet[String(ys)] = true; });
+                allUtils = utilsMapped.filter(function (u) {
+                    return u.propertyId === propId && yearSet[String(u.year)];
+                });
+                const tr = await ImmoApp.api.getTenants({ limit: 500 });
+                allTenants = (tr.data || []).map(ImmoApp.api.mapTenantFromApi).filter(function (t) { return t.propertyId === propId; });
+            } else {
+                const db = ImmoApp.db.instance;
+                property = await db.properties.get(propId);
+                targetTenant = await db.tenants.get(tenantId);
+                allUtils = [];
+                for (const yStr of yearsToInclude) {
+                    const arr = await db.utilities.where("year").equals(yStr).filter(function (u) { return u.propertyId === propId; }).toArray();
+                    allUtils.push(...arr);
+                }
+                allTenants = await db.tenants.where("propertyId").equals(propId).toArray();
+            }
 
             const sender = (ImmoApp.settings && ImmoApp.settings.getSenderConfig) ? await ImmoApp.settings.getSenderConfig() : {};
             const senderLines = [sender.name, sender.street, [sender.zip, sender.city].filter(Boolean).join(' '), sender.country].filter(Boolean);
@@ -753,14 +895,6 @@ window.ImmoApp.utilities = {
                 await this.generateFlatRateStatement(targetTenant, property, currentYear);
                 return;
             }
-
-        // Kosten & Mieter fürs Objekt laden (über mehrere Jahre im Zeitraum)
-        const allUtils = [];
-        for(const yStr of yearsToInclude) {
-            const arr = await db.utilities.where('year').equals(yStr).filter(u => u.propertyId === propId).toArray();
-            allUtils.push(...arr);
-        }
-        const allTenants = await db.tenants.where('propertyId').equals(propId).toArray();
 
         const uncategorized = allUtils.filter(u => !u.category || !u.splitKey);
         if(uncategorized.length > 0) {
@@ -1071,16 +1205,29 @@ ${paymentDefault}
                 let driveWebViewLink = "";
                 let driveModifiedTime = "";
 
-                if (checksum && ImmoApp.db?.instance?.documents && Number.isFinite(tenantId)) {
-                    const existing = await ImmoApp.db.instance.documents
-                        .where("tenantId")
-                        .equals(tenantId)
-                        .filter(d => d.docType === "NK" && d.checksum === checksum)
-                        .first();
-                    if (existing) {
-                        driveFileId = existing.driveFileId || "";
-                        driveWebViewLink = existing.driveWebViewLink || "";
-                        driveModifiedTime = existing.driveModifiedTime || "";
+                if (checksum && Number.isFinite(tenantId)) {
+                    if (ImmoApp.api && ImmoApp.api.useApiData()) {
+                        try {
+                            const ex = await ImmoApp.api.findDocumentDuplicateForTenant(tenantId, "NK", checksum, "", "");
+                            if (ex) {
+                                driveFileId = ex.drive_file_id || "";
+                                driveWebViewLink = ex.drive_web_view_link || "";
+                                driveModifiedTime = ex.drive_modified_time || "";
+                            }
+                        } catch (e) {
+                            /* ignorieren */
+                        }
+                    } else if (ImmoApp.db?.instance?.documents) {
+                        const existing = await ImmoApp.db.instance.documents
+                            .where("tenantId")
+                            .equals(tenantId)
+                            .filter(d => d.docType === "NK" && d.checksum === checksum)
+                            .first();
+                        if (existing) {
+                            driveFileId = existing.driveFileId || "";
+                            driveWebViewLink = existing.driveWebViewLink || "";
+                            driveModifiedTime = existing.driveModifiedTime || "";
+                        }
                     }
                 }
 

@@ -76,9 +76,15 @@ window.ImmoApp.maintenance = {
     },
 
     showModal: async function(id = null) {
-        const db = ImmoApp.db.instance;
-        const props = await db.properties.toArray();
-        
+        const useApi = ImmoApp.api && ImmoApp.api.useApiData();
+        let props;
+        if (useApi) {
+            const r = await ImmoApp.api.getProperties({ limit: 500 });
+            props = (r.data || []).map(ImmoApp.api.mapPropertyFromApi);
+        } else {
+            props = await ImmoApp.db.instance.properties.toArray();
+        }
+
         const propSelect = document.getElementById('modal-maint-prop');
         propSelect.innerHTML = `<option value="">-- Allgemein / Kein spezielles Objekt --</option>`;
         props.forEach(p => {
@@ -86,7 +92,17 @@ window.ImmoApp.maintenance = {
         });
 
         if (id) {
-            const task = await db.maintenance.get(id);
+            let task;
+            if (useApi) {
+                const row = await ImmoApp.api.getMaintenanceById(id);
+                task = row ? ImmoApp.api.mapMaintenanceFromApi(row) : null;
+            } else {
+                task = await ImmoApp.db.instance.maintenance.get(id);
+            }
+            if (!task) {
+                alert("Eintrag nicht gefunden.");
+                return;
+            }
             document.getElementById('modal-maint-id').value = task.id;
             document.getElementById('modal-maint-date').value = task.date || '';
             document.getElementById('modal-maint-prop').value = task.propertyId || '';
@@ -104,7 +120,7 @@ window.ImmoApp.maintenance = {
     },
 
     saveTask: async function() {
-        const db = ImmoApp.db.instance;
+        const useApi = ImmoApp.api && ImmoApp.api.useApiData();
         const id = document.getElementById('modal-maint-id').value;
         const date = document.getElementById('modal-maint-date').value;
         const propertyId = document.getElementById('modal-maint-prop').value;
@@ -113,42 +129,93 @@ window.ImmoApp.maintenance = {
 
         if (!task.trim()) return alert("Bitte eine Beschreibung eingeben.");
 
-        const data = {
-            date,
-            propertyId: propertyId ? parseInt(propertyId) : null,
-            task,
-            status
-        };
-
-        if (id) await db.maintenance.update(parseInt(id), data);
-        else await db.maintenance.add(data);
+        try {
+            if (useApi) {
+                const body = {
+                    date_value: date || null,
+                    property_id: propertyId ? parseInt(propertyId, 10) : null,
+                    tenant_id: null,
+                    task: task.trim(),
+                    status: status
+                };
+                if (id) {
+                    await ImmoApp.api.patchMaintenance(parseInt(id, 10), body);
+                } else {
+                    await ImmoApp.api.postMaintenance(Object.assign({ record_type: null }, body));
+                }
+            } else {
+                const db = ImmoApp.db.instance;
+                const data = {
+                    date,
+                    propertyId: propertyId ? parseInt(propertyId) : null,
+                    task,
+                    status
+                };
+                if (id) await db.maintenance.update(parseInt(id, 10), data);
+                else await db.maintenance.add(data);
+            }
+        } catch (e) {
+            alert(e.message || "Speichern fehlgeschlagen.");
+            return;
+        }
 
         document.getElementById('modal-maintenance').classList.add('hidden');
         this.render();
     },
 
     deleteTask: async function(id) {
-        if (confirm("Möchtest du diesen Eintrag wirklich löschen?")) {
-            const db = ImmoApp.db.instance;
-            await db.maintenance.delete(id);
-            this.render();
+        if (!confirm("Möchtest du diesen Eintrag wirklich löschen?")) return;
+        try {
+            if (ImmoApp.api && ImmoApp.api.useApiData()) {
+                await ImmoApp.api.deleteMaintenance(id);
+            } else {
+                await ImmoApp.db.instance.maintenance.delete(id);
+            }
+        } catch (e) {
+            alert(e.message || "Löschen fehlgeschlagen (ggf. nur ADMIN).");
+            return;
         }
+        this.render();
     },
 
     toggleStatus: async function(id) {
-        const db = ImmoApp.db.instance;
-        const task = await db.maintenance.get(id);
-        const newStatus = task.status === 'OPEN' ? 'DONE' : 'OPEN';
-        await db.maintenance.update(id, { status: newStatus });
+        try {
+            if (ImmoApp.api && ImmoApp.api.useApiData()) {
+                const row = await ImmoApp.api.getMaintenanceById(id);
+                const task = row ? ImmoApp.api.mapMaintenanceFromApi(row) : null;
+                if (!task) return;
+                const newStatus = task.status === 'OPEN' ? 'DONE' : 'OPEN';
+                await ImmoApp.api.patchMaintenance(id, { status: newStatus });
+            } else {
+                const db = ImmoApp.db.instance;
+                const task = await db.maintenance.get(id);
+                const newStatus = task.status === 'OPEN' ? 'DONE' : 'OPEN';
+                await db.maintenance.update(id, { status: newStatus });
+            }
+        } catch (e) {
+            alert(e.message || "Status konnte nicht geändert werden.");
+            return;
+        }
         this.render();
     },
 
     render: async function() {
         this.setupHTML();
-        const db = ImmoApp.db.instance;
-        
-        const tasks = await db.maintenance.toArray();
-        const props = await db.properties.toArray();
+        const useApi = ImmoApp.api && ImmoApp.api.useApiData();
+        let tasks;
+        let props;
+        if (useApi) {
+            const [mr, pr] = await Promise.all([
+                ImmoApp.api.getMaintenance({ limit: 5000 }),
+                ImmoApp.api.getProperties({ limit: 500 })
+            ]);
+            tasks = (mr.data || []).map(ImmoApp.api.mapMaintenanceFromApi);
+            props = (pr.data || []).map(ImmoApp.api.mapPropertyFromApi);
+        } else {
+            const db = ImmoApp.db.instance;
+            tasks = await db.maintenance.toArray();
+            props = await db.properties.toArray();
+        }
 
         // Nach Datum sortieren (neueste zuerst)
         tasks.sort((a, b) => new Date(b.date || '2000-01-01') - new Date(a.date || '2000-01-01'));

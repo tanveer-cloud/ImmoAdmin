@@ -3,6 +3,37 @@ window.ImmoApp = window.ImmoApp || {};
 window.ImmoApp.tenants = {
     showAll: false,
 
+    _loadPropsList: async function () {
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            const pr = await ImmoApp.api.getProperties({ limit: 500 });
+            return (pr.data || []).map(ImmoApp.api.mapPropertyFromApi);
+        }
+        if (ImmoApp.api && ImmoApp.api.isApiMode() && ImmoApp.api.baseUrl && !ImmoApp.api.getToken()) {
+            throw new Error("API-Modus: bitte unter Einstellungen anmelden.");
+        }
+        return ImmoApp.db.instance.properties.toArray();
+    },
+
+    _loadPropsAndTenants: async function () {
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            const [pr, tr] = await Promise.all([
+                ImmoApp.api.getProperties({ limit: 500 }),
+                ImmoApp.api.getTenants({ limit: 500 })
+            ]);
+            return {
+                props: (pr.data || []).map(ImmoApp.api.mapPropertyFromApi),
+                list: (tr.data || []).map(ImmoApp.api.mapTenantFromApi)
+            };
+        }
+        if (ImmoApp.api && ImmoApp.api.isApiMode() && ImmoApp.api.baseUrl && !ImmoApp.api.getToken()) {
+            throw new Error("API_AUTH");
+        }
+        const db = ImmoApp.db.instance;
+        const props = await db.properties.toArray();
+        const list = await db.tenants.toArray();
+        return { props, list };
+    },
+
     setupHTML: function() {
         const container = document.getElementById("tenants-content");
         if (container.innerHTML.includes("Lade Module...")) {
@@ -127,7 +158,18 @@ window.ImmoApp.tenants = {
         }
         const tenantId = parseInt(tenantIdAttr, 10);
         const db = ImmoApp.db.instance;
-        const tenant = await db.tenants.get(tenantId);
+        let tenant;
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            try {
+                const row = await ImmoApp.api.getTenant(tenantId);
+                tenant = row ? ImmoApp.api.mapTenantFromApi(row) : null;
+            } catch (e) {
+                alert(e.message || "Mieter nicht geladen.");
+                return;
+            }
+        } else {
+            tenant = await db.tenants.get(tenantId);
+        }
         if (!tenant) {
             alert("Mieter nicht gefunden.");
             return;
@@ -264,7 +306,19 @@ __________________________
             return;
         }
         const db = ImmoApp.db.instance;
-        const tenant = await db.tenants.get(parseInt(tenantId, 10));
+        const useApi = ImmoApp.api && ImmoApp.api.useApiData();
+        let tenant;
+        if (useApi) {
+            try {
+                const row = await ImmoApp.api.getTenant(parseInt(tenantId, 10));
+                tenant = row ? ImmoApp.api.mapTenantFromApi(row) : null;
+            } catch (e) {
+                alert(e.message || "Mieter nicht geladen.");
+                return;
+            }
+        } else {
+            tenant = await db.tenants.get(parseInt(tenantId, 10));
+        }
         if (!tenant) return alert("Mieter nicht gefunden.");
 
         const sender = (ImmoApp.settings && ImmoApp.settings.getSenderConfig) ? await ImmoApp.settings.getSenderConfig() : {};
@@ -411,16 +465,36 @@ __________________________
         let driveWebViewLink = "";
         let driveModifiedTime = "";
         const autoUpload = settings.isDocumentAutoUploadEnabled ? await settings.isDocumentAutoUploadEnabled() : false;
-        if (checksum && ImmoApp.db?.instance?.documents) {
-            const existing = await ImmoApp.db.instance.documents
-                .where("tenantId")
-                .equals(tenantId)
-                .filter(d => d.docType === (params.docType || "LETTER") && d.checksum === checksum)
-                .first();
-            if (existing) {
-                driveFileId = existing.driveFileId || "";
-                driveWebViewLink = existing.driveWebViewLink || "";
-                driveModifiedTime = existing.driveModifiedTime || "";
+        const docType = params.docType || "LETTER";
+        if (checksum && tenantId) {
+            if (ImmoApp.api && ImmoApp.api.useApiData()) {
+                try {
+                    const ex = await ImmoApp.api.findDocumentDuplicateForTenant(
+                        tenantId,
+                        docType,
+                        checksum,
+                        params.periodStart || "",
+                        params.periodEnd || ""
+                    );
+                    if (ex) {
+                        driveFileId = ex.drive_file_id || "";
+                        driveWebViewLink = ex.drive_web_view_link || "";
+                        driveModifiedTime = ex.drive_modified_time || "";
+                    }
+                } catch (e) {
+                    /* ignorieren */
+                }
+            } else if (ImmoApp.db?.instance?.documents) {
+                const existing = await ImmoApp.db.instance.documents
+                    .where("tenantId")
+                    .equals(tenantId)
+                    .filter(d => d.docType === docType && d.checksum === checksum)
+                    .first();
+                if (existing) {
+                    driveFileId = existing.driveFileId || "";
+                    driveWebViewLink = existing.driveWebViewLink || "";
+                    driveModifiedTime = existing.driveModifiedTime || "";
+                }
             }
         }
         if (autoUpload && settings.uploadDocumentToDrive && !driveFileId) {
@@ -460,7 +534,19 @@ __________________________
 
     openMailDraft: async function(tenantId, subjectText, bodyText) {
         const db = ImmoApp.db.instance;
-        const tenant = await db.tenants.get(parseInt(tenantId, 10));
+        const tid = parseInt(tenantId, 10);
+        let tenant;
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            try {
+                const row = await ImmoApp.api.getTenant(tid);
+                tenant = row ? ImmoApp.api.mapTenantFromApi(row) : null;
+            } catch (e) {
+                alert(e.message || "Mieter nicht geladen.");
+                return;
+            }
+        } else {
+            tenant = await db.tenants.get(tid);
+        }
         if (!tenant) return alert("Mieter nicht gefunden.");
         if (!tenant.email) {
             alert("Keine E‑Mail beim Mieter hinterlegt.");
@@ -539,7 +625,18 @@ __________________________
         }
         const tenantId = parseInt(tenantIdAttr, 10);
         const db = ImmoApp.db.instance;
-        const tenant = await db.tenants.get(tenantId);
+        let tenant;
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            try {
+                const row = await ImmoApp.api.getTenant(tenantId);
+                tenant = row ? ImmoApp.api.mapTenantFromApi(row) : null;
+            } catch (e) {
+                alert(e.message || "Mieter nicht geladen.");
+                return;
+            }
+        } else {
+            tenant = await db.tenants.get(tenantId);
+        }
         if (!tenant) {
             alert("Mieter nicht gefunden.");
             return;
@@ -573,10 +670,30 @@ __________________________
         const periodEndYear = usePeriod ? periodEnd.getFullYear() : year;
 
         const propId = tenant.propertyId || null;
-        const property = propId ? await db.properties.get(propId) : null;
+        const useApiStmt = ImmoApp.api && ImmoApp.api.useApiData();
+        let property;
+        let mode;
+        let allTenantsInProp;
+        mode = (await db.settings.get("wgDistributionMode"))?.value || "PERSON_DAYS";
 
-        const mode = (await db.settings.get("wgDistributionMode"))?.value || "PERSON_DAYS";
-        const allTenantsInProp = propId ? await db.tenants.where("propertyId").equals(propId).toArray() : [];
+        if (useApiStmt) {
+            if (propId) {
+                try {
+                    const prow = await ImmoApp.api.getProperty(propId);
+                    property = prow ? ImmoApp.api.mapPropertyFromApi(prow) : null;
+                } catch (e) {
+                    property = null;
+                }
+                const tr = await ImmoApp.api.getTenants({ limit: 500 });
+                allTenantsInProp = (tr.data || []).map(ImmoApp.api.mapTenantFromApi).filter(function (t) { return t.propertyId === propId; });
+            } else {
+                property = null;
+                allTenantsInProp = [];
+            }
+        } else {
+            property = propId ? await db.properties.get(propId) : null;
+            allTenantsInProp = propId ? await db.tenants.where("propertyId").equals(propId).toArray() : [];
+        }
 
         const msDay = 24 * 60 * 60 * 1000;
         const calcWeightForTenantPeriod = (t) => {
@@ -607,16 +724,28 @@ __________________________
             selfW = weights.find(w => w.tenant.id === tenant.id) || null;
         }
 
-        const allUtils = usePeriod
-            ? (await (async () => {
-                const res = [];
-                for (let y = periodStart.getFullYear(); y <= periodEnd.getFullYear(); y++) {
-                    const arr = await db.utilities.where('year').equals(String(y)).toArray();
-                    res.push(...arr);
-                }
-                return res;
-            })())
-            : await db.utilities.where('year').equals(year).toArray();
+        let allUtils;
+        if (useApiStmt) {
+            const ur = await ImmoApp.api.getUtilities({ limit: 5000 });
+            const mapped = (ur.data || []).map(ImmoApp.api.mapUtilityFromApi);
+            allUtils = usePeriod
+                ? mapped.filter(function (u) {
+                    const yn = parseInt(u.year, 10);
+                    return Number.isFinite(yn) && yn >= periodStart.getFullYear() && yn <= periodEnd.getFullYear();
+                })
+                : mapped.filter(function (u) { return String(u.year) === String(year); });
+        } else {
+            allUtils = usePeriod
+                ? (await (async () => {
+                    const res = [];
+                    for (let y = periodStart.getFullYear(); y <= periodEnd.getFullYear(); y++) {
+                        const arr = await db.utilities.where("year").equals(String(y)).toArray();
+                        res.push(...arr);
+                    }
+                    return res;
+                })())
+                : await db.utilities.where("year").equals(year).toArray();
+        }
 
         const utilsForProp = allUtils.filter(u => (u.propertyId != null && propId != null && u.propertyId === propId));
         const unassignedForYear = allUtils.filter(u => u.propertyId == null);
@@ -863,7 +992,19 @@ Hinweistext (editierbar):
             return;
         }
         const db = ImmoApp.db.instance;
-        const tenant = await db.tenants.get(parseInt(tenantId, 10));
+        const useApi = ImmoApp.api && ImmoApp.api.useApiData();
+        let tenant;
+        if (useApi) {
+            try {
+                const row = await ImmoApp.api.getTenant(parseInt(tenantId, 10));
+                tenant = row ? ImmoApp.api.mapTenantFromApi(row) : null;
+            } catch (e) {
+                alert(e.message || "Mieter nicht geladen.");
+                return;
+            }
+        } else {
+            tenant = await db.tenants.get(parseInt(tenantId, 10));
+        }
         if (!tenant) return alert("Mieter nicht gefunden.");
 
         const sender = (ImmoApp.settings && ImmoApp.settings.getSenderConfig) ? await ImmoApp.settings.getSenderConfig() : {};
@@ -886,23 +1027,55 @@ Hinweistext (editierbar):
         const fmtDE = (dt) => `${String(dt.getDate()).padStart(2, '0')}.${String(dt.getMonth() + 1).padStart(2, '0')}.${dt.getFullYear()}`;
         const periodLabel = usePeriod ? `${fmtDE(periodStart)} - ${fmtDE(periodEnd)}` : String(year);
         const propId = tenant.propertyId || null;
-        const property = propId ? await db.properties.get(propId) : null;
-
-        const allUtils = usePeriod
-            ? (await (async () => {
-                const res = [];
-                for (let y = periodStart.getFullYear(); y <= periodEnd.getFullYear(); y++) {
-                    const arr = await db.utilities.where('year').equals(String(y)).toArray();
-                    res.push(...arr);
+        let property = null;
+        if (propId) {
+            if (useApi) {
+                try {
+                    const prow = await ImmoApp.api.getProperty(propId);
+                    property = prow ? ImmoApp.api.mapPropertyFromApi(prow) : null;
+                } catch (e) {
+                    property = null;
                 }
-                return res;
-            })())
-            : await db.utilities.where('year').equals(year).toArray();
+            } else {
+                property = await db.properties.get(propId);
+            }
+        }
+
+        let allUtils;
+        if (useApi) {
+            const ur = await ImmoApp.api.getUtilities({ limit: 5000 });
+            const mapped = (ur.data || []).map(ImmoApp.api.mapUtilityFromApi);
+            allUtils = usePeriod
+                ? mapped.filter(u => {
+                    const yn = parseInt(u.year, 10);
+                    return Number.isFinite(yn) && yn >= periodStart.getFullYear() && yn <= periodEnd.getFullYear();
+                })
+                : mapped.filter(u => String(u.year) === String(year));
+        } else {
+            allUtils = usePeriod
+                ? (await (async () => {
+                    const res = [];
+                    for (let y = periodStart.getFullYear(); y <= periodEnd.getFullYear(); y++) {
+                        const arr = await db.utilities.where('year').equals(String(y)).toArray();
+                        res.push(...arr);
+                    }
+                    return res;
+                })())
+                : await db.utilities.where('year').equals(year).toArray();
+        }
         const utilsForProp = allUtils.filter(u => (u.propertyId != null && propId != null && u.propertyId === propId));
 
         const totalCosts = utilsForProp.reduce((sum, u) => sum + (parseFloat(u.amount) || 0), 0);
         const mode = (await db.settings.get("wgDistributionMode"))?.value || "PERSON_DAYS";
-        const allTenantsInProp = propId ? await db.tenants.where("propertyId").equals(propId).toArray() : [];
+        let allTenantsInProp = [];
+        if (propId) {
+            if (useApi) {
+                const tr = await ImmoApp.api.getTenants({ limit: 500 });
+                allTenantsInProp = (tr.data || []).map(ImmoApp.api.mapTenantFromApi).filter(t => t.propertyId === propId);
+            } else {
+                allTenantsInProp = await db.tenants.where("propertyId").equals(propId).toArray();
+            }
+        }
 
         const msDay = 24 * 60 * 60 * 1000;
         const weights = usePeriod
@@ -1107,13 +1280,21 @@ Hinweistext (editierbar):
 
     // NEU: Direkte Löschfunktion aus der Historie
     deleteHistoryTx: async function(txId, tenantId) {
-        if(confirm("ACHTUNG: Willst du diesen Eintrag wirklich aus der Historie (und dem Kontoauszug) LÖSCHEN?")) {
-            await ImmoApp.db.instance.transactions.delete(txId);
-            this.showHistoryModal(tenantId);
-            this.render();
-            if(window.ImmoApp.dashboard) ImmoApp.dashboard.render();
-            if(window.ImmoApp.banking) ImmoApp.banking.render();
+        if (!confirm("ACHTUNG: Willst du diesen Eintrag wirklich aus der Historie (und dem Kontoauszug) LÖSCHEN?")) return;
+        try {
+            if (ImmoApp.api && ImmoApp.api.useApiData()) {
+                await ImmoApp.api.deleteTransaction(txId);
+            } else {
+                await ImmoApp.db.instance.transactions.delete(txId);
+            }
+        } catch (e) {
+            alert(e.message || "Löschen fehlgeschlagen");
+            return;
         }
+        this.showHistoryModal(tenantId);
+        this.render();
+        if (window.ImmoApp.dashboard) ImmoApp.dashboard.render();
+        if (window.ImmoApp.banking) ImmoApp.banking.render();
     },
 
     // NEU: Manuelle Korrektur direkt in der Historie eintragen
@@ -1127,22 +1308,57 @@ Hinweistext (editierbar):
         const purpose = prompt("Verwendungszweck (z.B. 'Barzahlung' oder 'Korrektur'):", "Manuelle Korrektur");
         
         const db = ImmoApp.db.instance;
-        const tenant = await db.tenants.get(tenantId);
-        const date = new Date().toLocaleDateString('de-DE'); // Heutiges Datum
+        const tid = parseInt(String(tenantId), 10);
+        let tenant;
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            try {
+                const row = await ImmoApp.api.getTenant(tid);
+                tenant = row ? ImmoApp.api.mapTenantFromApi(row) : null;
+            } catch (e) {
+                alert(e.message || "Mieter nicht geladen.");
+                return;
+            }
+        } else {
+            tenant = await db.tenants.get(tid);
+        }
+        if (!tenant) return alert("Mieter nicht gefunden.");
+
         const year = ImmoApp.ui.currentYear;
-        
-        await db.transactions.add({
-            date: date,
-            amount: amount, 
-            name: tenant.name, 
-            purpose: purpose || 'Manuelle Korrektur',
-            iban: 'MANUELL', 
-            matchedTenantId: tenantId, 
-            category: 'RENT', 
-            year: year, 
-            importBatchId: 'manual_history'
-        });
-        
+
+        try {
+            if (ImmoApp.api && ImmoApp.api.useApiData()) {
+                const today = new Date();
+                const iso = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0") + "-" + String(today.getDate()).padStart(2, "0");
+                await ImmoApp.api.postTransaction({
+                    tenant_id: tid,
+                    date_value: iso,
+                    amount: amount,
+                    name: tenant.name,
+                    purpose: purpose || "Manuelle Korrektur",
+                    iban: "MANUELL",
+                    category: "RENT",
+                    year_value: String(year),
+                    import_batch_id: "manual_history"
+                });
+            } else {
+                const date = new Date().toLocaleDateString("de-DE");
+                await db.transactions.add({
+                    date: date,
+                    amount: amount,
+                    name: tenant.name,
+                    purpose: purpose || "Manuelle Korrektur",
+                    iban: "MANUELL",
+                    matchedTenantId: tid,
+                    category: "RENT",
+                    year: year,
+                    importBatchId: "manual_history"
+                });
+            }
+        } catch (e) {
+            alert(e.message || "Buchung konnte nicht gespeichert werden.");
+            return;
+        }
+
         this.showHistoryModal(tenantId);
         this.render();
         if(window.ImmoApp.dashboard) ImmoApp.dashboard.render();
@@ -1151,12 +1367,43 @@ Hinweistext (editierbar):
 
     showHistoryModal: async function(tenantId) {
         const db = ImmoApp.db.instance;
-        const tenant = await db.tenants.get(tenantId);
-        
-        // Button verknüpfen
-        document.getElementById('btn-add-history-manual').onclick = () => ImmoApp.tenants.addHistoryManualTx(tenantId);
-        
-        const allTrans = await db.transactions.where('matchedTenantId').equals(tenantId).toArray();
+        const tid = parseInt(String(tenantId), 10);
+        let tenant;
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            try {
+                const row = await ImmoApp.api.getTenant(tid);
+                tenant = row ? ImmoApp.api.mapTenantFromApi(row) : null;
+            } catch (e) {
+                alert(e.message || "Mieter nicht geladen.");
+                return;
+            }
+        } else {
+            tenant = await db.tenants.get(tenantId);
+        }
+        if (!tenant) {
+            alert("Mieter nicht gefunden.");
+            return;
+        }
+
+        const apiHist = !!(ImmoApp.api && ImmoApp.api.useApiData());
+        document.getElementById('btn-add-history-manual').onclick = () => {
+            ImmoApp.tenants.addHistoryManualTx(tenantId);
+        };
+
+        let allTrans;
+        if (apiHist) {
+            try {
+                const res = await ImmoApp.api.getTransactions({ limit: 8000 });
+                allTrans = (res.data || [])
+                    .filter(function (tx) { return Number(tx.tenant_id) === tid; })
+                    .map(ImmoApp.api.mapTransactionFromApi);
+            } catch (e) {
+                alert(e.message || "Buchungen nicht geladen.");
+                return;
+            }
+        } else {
+            allTrans = await db.transactions.where('matchedTenantId').equals(tenantId).toArray();
+        }
         
         allTrans.sort((a, b) => {
             const parseDate = (dStr) => {
@@ -1329,10 +1576,20 @@ Hinweistext (editierbar):
         const totalRooms = document.getElementById('modal-prop-rooms').value;
         
         if(!name) return alert("Der Name des Objekts darf nicht leer sein.");
-        
-        const data = { name, totalRooms: totalRooms ? parseInt(totalRooms) : null };
-        if(id) await db.properties.update(parseInt(id), data);
-        else await db.properties.add(data);
+
+        try {
+            if (ImmoApp.api && ImmoApp.api.useApiData()) {
+                const body = { name: name.trim(), total_rooms: totalRooms ? parseInt(totalRooms, 10) : null };
+                if (id) await ImmoApp.api.patchProperty(id, body);
+                else await ImmoApp.api.postProperty(body);
+            } else {
+                const data = { name, totalRooms: totalRooms ? parseInt(totalRooms) : null };
+                if(id) await db.properties.update(parseInt(id), data);
+                else await db.properties.add(data);
+            }
+        } catch (e) {
+            return alert(e.message || "Speichern fehlgeschlagen");
+        }
         
         document.getElementById('modal-property').classList.add('hidden');
         this.render();
@@ -1341,7 +1598,13 @@ Hinweistext (editierbar):
 
     showTenantModal: async function(tenantId = null, defaultName = '', defaultIban = '', defaultDate = '', defaultRent = '') {
         const db = ImmoApp.db.instance;
-        const props = await db.properties.toArray();
+        let props;
+        try {
+            props = await this._loadPropsList();
+        } catch (e) {
+            alert(e.message || "Objektliste konnte nicht geladen werden.");
+            return;
+        }
         const propSelect = document.getElementById('modal-tenant-property');
         
         propSelect.innerHTML = `<option value="">-- Bitte Objekt wählen --</option>`;
@@ -1451,7 +1714,22 @@ Hinweistext (editierbar):
         }
 
         if (tenantId) {
-            const t = await db.tenants.get(tenantId);
+            let t;
+            if (ImmoApp.api && ImmoApp.api.useApiData()) {
+                try {
+                    const row = await ImmoApp.api.getTenant(tenantId);
+                    t = row ? ImmoApp.api.mapTenantFromApi(row) : null;
+                } catch (e) {
+                    alert(e.message || "Mieter nicht geladen.");
+                    return;
+                }
+            } else {
+                t = await db.tenants.get(tenantId);
+            }
+            if (!t) {
+                alert("Mieter nicht gefunden.");
+                return;
+            }
             document.getElementById('modal-tenant-id').value = t.id;
             document.getElementById('modal-tenant-property').value = t.propertyId || '';
             document.getElementById('modal-tenant-room').value = t.room || '';
@@ -1533,19 +1811,26 @@ Hinweistext (editierbar):
             return alert("Bitte fülle Name, Einzugsdatum UND das zugeordnete Objekt aus!");
         }
 
-        // Miet-Historie: einfache Staffel, aktuell nur technisch gespeichert,
-        // die Berechnung wird in einem späteren Schritt umgestellt.
+        const useApiSave = ImmoApp.api && ImmoApp.api.useApiData();
         let rentHistory = [];
+        let existing = null;
         if (id) {
-            const existing = await db.tenants.get(parseInt(id));
-            if (existing && Array.isArray(existing.rentHistory)) {
-                rentHistory = existing.rentHistory;
+            if (useApiSave) {
+                try {
+                    const row = await ImmoApp.api.getTenant(parseInt(id, 10));
+                    existing = row ? ImmoApp.api.mapTenantFromApi(row) : null;
+                } catch (e) {
+                    console.warn(e);
+                }
+            } else {
+                existing = await db.tenants.get(parseInt(id, 10));
             }
-            // Wenn sich die Miete geändert hat, füge einen neuen Eintrag an
+            if (existing && Array.isArray(existing.rentHistory)) {
+                rentHistory = existing.rentHistory.slice();
+            }
             const prevRent = existing ? (existing.rent || 0) : 0;
             const prevPrepay = existing ? (existing.prepayment || 0) : 0;
             if (prevRent !== totalRent || prevPrepay !== prepayment) {
-                rentHistory = rentHistory || [];
                 const fromDate = rentFromInput || new Date().toISOString().split('T')[0];
                 rentHistory.push({
                     from: fromDate,
@@ -1555,7 +1840,6 @@ Hinweistext (editierbar):
                 });
             }
         } else {
-            // Neuer Mieter: initiale Miete als erster Eintrag hinterlegen
             rentHistory.push({
                 from: moveIn,
                 rent: totalRent,
@@ -1586,23 +1870,61 @@ Hinweistext (editierbar):
             rentHistory
         };
 
-        if (id) await db.tenants.update(parseInt(id), data);
-        else await db.tenants.add(data);
+        try {
+            if (useApiSave) {
+                const apiBody = {
+                    property_id: parseInt(propertyId, 10),
+                    name: name.trim(),
+                    email: email || null,
+                    street: street || null,
+                    zip: zip || null,
+                    city: city || null,
+                    country: country || null,
+                    room: room || null,
+                    rent: totalRent,
+                    prepayment: prepayment,
+                    deposit: deposit,
+                    move_in: moveIn || null,
+                    move_out: moveOut || null,
+                    iban: iban || null,
+                    deposit_returned: !!depositReturned,
+                    sqm: sqm,
+                    rent_history: rentHistory.length > 0 ? rentHistory : null
+                };
+                if (id) await ImmoApp.api.patchTenant(parseInt(id, 10), apiBody);
+                else await ImmoApp.api.postTenant(apiBody);
+            } else {
+                if (id) await db.tenants.update(parseInt(id), data);
+                else await db.tenants.add(data);
+            }
+        } catch (e) {
+            return alert(e.message || "Speichern fehlgeschlagen");
+        }
         
         document.getElementById('modal-tenant').classList.add('hidden');
-        if(window.ImmoApp.banking) await window.ImmoApp.banking.runAutoMatch();
+        if (window.ImmoApp.banking && !(ImmoApp.api && ImmoApp.api.useApiData())) {
+            await window.ImmoApp.banking.runAutoMatch();
+        }
         this.render();
         if(window.ImmoApp.dashboard) ImmoApp.dashboard.render();
     },
 
     deleteTenant: async function(id) {
         if(confirm("ACHTUNG: Willst du diesen Mieter wirklich löschen?\n\nAlle bisher zugeordneten Buchungen dieses Mieters werden dadurch wieder auf 'Offen' gesetzt!")) {
-            const db = ImmoApp.db.instance;
-            const txs = await db.transactions.where('matchedTenantId').equals(id).toArray();
-            for(let tx of txs) {
-                await db.transactions.update(tx.id, { matchedTenantId: null, category: 'UNMATCHED' });
+            try {
+                if (ImmoApp.api && ImmoApp.api.useApiData()) {
+                    await ImmoApp.api.deleteTenantApi(id);
+                } else {
+                    const db = ImmoApp.db.instance;
+                    const txs = await db.transactions.where('matchedTenantId').equals(id).toArray();
+                    for(let tx of txs) {
+                        await db.transactions.update(tx.id, { matchedTenantId: null, category: 'UNMATCHED' });
+                    }
+                    await db.tenants.delete(id);
+                }
+            } catch (e) {
+                return alert(e.message || "Löschen fehlgeschlagen");
             }
-            await db.tenants.delete(id);
             this.render();
             if(window.ImmoApp.dashboard) ImmoApp.dashboard.render();
             if(window.ImmoApp.banking) ImmoApp.banking.render();
@@ -1613,9 +1935,21 @@ Hinweistext (editierbar):
         this.setupHTML();
         const db = ImmoApp.db.instance;
         const currentYear = ImmoApp.ui.currentYear;
-        
-        const props = await db.properties.toArray();
         const propList = document.getElementById("properties-list");
+
+        let props;
+        let list;
+        try {
+            ({ props, list } = await this._loadPropsAndTenants());
+        } catch (e) {
+            if (e.message === "API_AUTH") {
+                propList.innerHTML = '<li class="px-4 py-3 text-amber-800 bg-amber-50 rounded">API-Modus: Bitte unter Einstellungen mit Benutzer und Passwort anmelden.</li>';
+                return;
+            }
+            propList.innerHTML = '<li class="px-4 py-3 text-red-700">' + (e.message || "Laden fehlgeschlagen") + "</li>";
+            return;
+        }
+
         propList.innerHTML = "";
         props.forEach(p => {
             const roomBadge = p.totalRooms ? `<span class="bg-gray-200 text-xs px-2 py-1 rounded ml-2">${p.totalRooms} Zimmer (WG)</span>` : '';
@@ -1630,7 +1964,6 @@ Hinweistext (editierbar):
             `;
         });
         
-        let list = await db.tenants.toArray();
         list.sort((a,b) => a.propertyId - b.propertyId);
         
         const tbodyActive = document.getElementById("tenants-table-body-active");

@@ -111,6 +111,27 @@ window.ImmoApp.dashboard = {
         }
     },
 
+    _loadDashboardCore: async function (currentYear) {
+        const db = ImmoApp.db.instance;
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            const [tr, tn, pr] = await Promise.all([
+                ImmoApp.api.getTransactions({ limit: 8000 }),
+                ImmoApp.api.getTenants({ limit: 500 }),
+                ImmoApp.api.getProperties({ limit: 500 })
+            ]);
+            const allTrans = (tr.data || [])
+                .map(ImmoApp.api.mapTransactionFromApi)
+                .filter(function (tx) { return String(tx.year) === String(currentYear); });
+            const allTenants = (tn.data || []).map(ImmoApp.api.mapTenantFromApi);
+            const allProps = (pr.data || []).map(ImmoApp.api.mapPropertyFromApi);
+            return { allTrans: allTrans, allTenants: allTenants, allProps: allProps };
+        }
+        const allTenants = await db.tenants.toArray();
+        const allTrans = await db.transactions.where("year").equals(currentYear).toArray();
+        const allProps = await db.properties.toArray();
+        return { allTrans: allTrans, allTenants: allTenants, allProps: allProps };
+    },
+
     jumpToBanking: function(tenantName) {
         document.getElementById('modal-monthly-details').classList.add('hidden');
         ImmoApp.ui.switchTab('banking');
@@ -139,22 +160,52 @@ window.ImmoApp.dashboard = {
 
     addManualPayment: async function(tenantId, month, amount) {
         const db = ImmoApp.db.instance;
-        const tenant = await db.tenants.get(tenantId);
+        let tenant;
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            const row = await ImmoApp.api.getTenant(tenantId);
+            tenant = row ? ImmoApp.api.mapTenantFromApi(row) : null;
+        } else {
+            tenant = await db.tenants.get(tenantId);
+        }
+        if (!tenant) {
+            alert("Mieter nicht gefunden.");
+            return;
+        }
         const currentYear = ImmoApp.ui.currentYear;
         const monthStr = month.toString().padStart(2, '0');
 
         if(confirm(`Möchtest du eine manuelle Korrektur über ${ImmoApp.ui.formatCurrency(amount)} eintragen?`)) {
-            await db.transactions.add({
-                date: `15.${monthStr}.${currentYear.substring(2)}`,
-                amount: amount, 
-                name: tenant.name, 
-                purpose: `Manuell ausgeglichen für ${monthStr}/${currentYear}`, // NEU: Klare Formulierung
-                iban: 'MANUELL', 
-                matchedTenantId: tenantId, 
-                category: 'RENT', 
-                year: currentYear, 
-                importBatchId: 'manual'
-            });
+            try {
+                if (ImmoApp.api && ImmoApp.api.useApiData()) {
+                    const iso = currentYear + "-" + monthStr + "-15";
+                    await ImmoApp.api.postTransaction({
+                        tenant_id: tenantId,
+                        date_value: iso,
+                        amount: amount,
+                        name: tenant.name,
+                        purpose: "Manuell ausgeglichen für " + monthStr + "/" + currentYear,
+                        iban: "MANUELL",
+                        category: "RENT",
+                        year_value: String(currentYear),
+                        import_batch_id: "manual"
+                    });
+                } else {
+                    await db.transactions.add({
+                        date: `15.${monthStr}.${currentYear.substring(2)}`,
+                        amount: amount,
+                        name: tenant.name,
+                        purpose: `Manuell ausgeglichen für ${monthStr}/${currentYear}`,
+                        iban: 'MANUELL',
+                        matchedTenantId: tenantId,
+                        category: 'RENT',
+                        year: currentYear,
+                        importBatchId: 'manual'
+                    });
+                }
+            } catch (e) {
+                alert(e.message || "Speichern fehlgeschlagen");
+                return;
+            }
             this.showMonthlyDetails(tenantId);
             this.render();
             if(window.ImmoApp.banking) ImmoApp.banking.render();
@@ -163,7 +214,16 @@ window.ImmoApp.dashboard = {
 
     deleteManualPayment: async function(txId, tenantId) {
         if(confirm("Möchtest du diesen manuellen Eintrag wirklich wieder löschen?")) {
-            await ImmoApp.db.instance.transactions.delete(txId);
+            try {
+                if (ImmoApp.api && ImmoApp.api.useApiData()) {
+                    await ImmoApp.api.deleteTransaction(txId);
+                } else {
+                    await ImmoApp.db.instance.transactions.delete(txId);
+                }
+            } catch (e) {
+                alert(e.message || "Löschen fehlgeschlagen");
+                return;
+            }
             this.showMonthlyDetails(tenantId);
             this.render();
             if(window.ImmoApp.banking) ImmoApp.banking.render();
@@ -172,8 +232,17 @@ window.ImmoApp.dashboard = {
 
     markDepositPaid: async function(tenantId) {
         if(confirm("Wurde die Kaution an den Mieter zurücküberwiesen und soll sie aus dieser Warnliste verschwinden?")) {
-            const db = ImmoApp.db.instance;
-            await db.tenants.update(tenantId, { depositReturned: true });
+            try {
+                if (ImmoApp.api && ImmoApp.api.useApiData()) {
+                    await ImmoApp.api.patchTenant(tenantId, { deposit_returned: true });
+                } else {
+                    const db = ImmoApp.db.instance;
+                    await db.tenants.update(tenantId, { depositReturned: true });
+                }
+            } catch (e) {
+                alert(e.message || "Speichern fehlgeschlagen");
+                return;
+            }
             this.render();
             if(window.ImmoApp.tenants) ImmoApp.tenants.render();
         }
@@ -185,9 +254,20 @@ window.ImmoApp.dashboard = {
         const currentYear = ImmoApp.ui.currentYear;
         const today = new Date();
         
-        const allTenants = await db.tenants.toArray();
-        const allTrans = await db.transactions.where('year').equals(currentYear).toArray();
-        const allProps = await db.properties.toArray();
+        let allTenants;
+        let allTrans;
+        let allProps;
+        try {
+            const pack = await this._loadDashboardCore(currentYear);
+            allTenants = pack.allTenants;
+            allTrans = pack.allTrans;
+            allProps = pack.allProps;
+        } catch (e) {
+            console.error(e);
+            const statusList = document.getElementById("dash-status-list");
+            if (statusList) statusList.innerHTML = '<li class="text-red-600">Daten: ' + (e.message || "Fehler") + "</li>";
+            return;
+        }
         const now = new Date();
         const realCurrentYear = now.getFullYear();
         const monthLimit = (parseInt(currentYear, 10) === realCurrentYear) ? now.getMonth() : 11; // 0..11 inclusive
@@ -456,10 +536,38 @@ window.ImmoApp.dashboard = {
     showMonthlyDetails: async function(tenantId) {
         const db = ImmoApp.db.instance;
         const currentYear = ImmoApp.ui.currentYear;
-        const tenant = await db.tenants.get(tenantId);
-        // Alle Mieten dieses Mieters holen, Jahr und Monat später robust über das Datum filtern
-        const allTrans = await db.transactions.where('matchedTenantId').equals(tenantId)
-                            .filter(tx => tx.category === 'RENT').toArray();
+        let tenant;
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            try {
+                const row = await ImmoApp.api.getTenant(tenantId);
+                tenant = row ? ImmoApp.api.mapTenantFromApi(row) : null;
+            } catch (e) {
+                alert(e.message || "Mieter nicht geladen.");
+                return;
+            }
+        } else {
+            tenant = await db.tenants.get(tenantId);
+        }
+        if (!tenant) {
+            alert("Mieter nicht gefunden.");
+            return;
+        }
+
+        let allTrans;
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            try {
+                const res = await ImmoApp.api.getTransactions({ limit: 8000 });
+                allTrans = (res.data || []).map(ImmoApp.api.mapTransactionFromApi).filter(function (tx) {
+                    return Number(tx.matchedTenantId) === Number(tenantId) && tx.category === "RENT";
+                });
+            } catch (e) {
+                alert(e.message || "Buchungen nicht geladen.");
+                return;
+            }
+        } else {
+            allTrans = await db.transactions.where("matchedTenantId").equals(tenantId)
+                .filter(function (tx) { return tx.category === "RENT"; }).toArray();
+        }
         
         document.getElementById('monthly-tenant-name').innerText = tenant.name;
         document.getElementById('monthly-year-label').innerText = currentYear;

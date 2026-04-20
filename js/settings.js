@@ -15,6 +15,7 @@ window.ImmoApp.settings = {
                     <button type="button" id="settings-tab-backup" onclick="ImmoApp.settings.switchSettingsTab('backup')" class="settings-cat-tab nav-btn py-2 px-3 text-sm rounded-md text-gray-600 hover:text-blue-700">Backup &amp; Import</button>
                     <button type="button" id="settings-tab-google" onclick="ImmoApp.settings.switchSettingsTab('google')" class="settings-cat-tab nav-btn py-2 px-3 text-sm rounded-md text-gray-600 hover:text-blue-700">Google Drive</button>
                     <button type="button" id="settings-tab-brief" onclick="ImmoApp.settings.switchSettingsTab('brief')" class="settings-cat-tab nav-btn py-2 px-3 text-sm rounded-md text-gray-600 hover:text-blue-700">Briefkopf</button>
+                    <button type="button" id="settings-tab-users" onclick="ImmoApp.settings.switchSettingsTab('users')" class="settings-cat-tab nav-btn py-2 px-3 text-sm rounded-md text-gray-600 hover:text-blue-700 hidden">Benutzer</button>
                     <button type="button" id="settings-tab-danger" onclick="ImmoApp.settings.switchSettingsTab('danger')" class="settings-cat-tab nav-btn py-2 px-3 text-sm rounded-md text-red-700 hover:text-red-800 hover:bg-red-50">Daten löschen</button>
                 </div>
 
@@ -138,6 +139,27 @@ window.ImmoApp.settings = {
                         </button>
                     </div>
 
+                    <div class="lg:col-span-2 mt-4 pt-6 border-t border-slate-200">
+                        <div class="bg-amber-50 border border-amber-200 rounded-lg p-5">
+                            <h3 class="text-base font-bold text-amber-950">⬆️ Lokale Daten zum Server übertragen</h3>
+                            <p class="text-xs text-amber-900/90 mt-2 leading-relaxed">
+                                Schreibt die Daten aus dieser Browser-Datenbank (IndexedDB) per API auf den Server — <strong>nur wenn du den Button unten klickst</strong>.
+                                Normales Arbeiten <strong>ohne</strong> API-Modus oder ohne diesen Schritt ändert am Server <strong>nichts</strong>.
+                                Es werden <strong>neue</strong> Datensätze auf dem Server angelegt (neue IDs); Verknüpfungen (Objekt → Mieter → Buchungen …) werden mitgemappt.
+                                <strong>Briefkopf / Google-Einstellungen</strong> liegen nur lokal und werden nicht mitgeschickt.
+                            </p>
+                            <p class="text-xs text-amber-950 mt-2">Voraussetzung: Tab <strong>Server &amp; API</strong> — Base-URL gespeichert und <strong>angemeldet</strong>.</p>
+                            <label class="flex items-start gap-2 mt-3 text-xs text-amber-950 cursor-pointer">
+                                <input type="checkbox" id="sync-allow-nonempty-server" class="mt-0.5 w-4 h-4 rounded border-amber-400">
+                                <span>Server darf schon Daten enthalten — trotzdem alles aus dem Browser <strong>zusätzlich</strong> anlegen (kann Duplikate erzeugen; nur wenn du dir sicher bist).</span>
+                            </label>
+                            <p id="sync-local-status" class="text-xs font-mono text-amber-950 mt-3 min-h-[1.25rem] whitespace-pre-wrap"></p>
+                            <button type="button" onclick="ImmoApp.settings.runLocalToServerSync()" class="mt-3 bg-amber-700 text-white px-4 py-2.5 rounded-lg font-bold text-sm hover:bg-amber-800 transition w-full sm:w-auto">
+                                Jetzt lokale Daten zum Server übertragen
+                            </button>
+                        </div>
+                    </div>
+
                 </div>
                 </div>
 
@@ -244,6 +266,51 @@ window.ImmoApp.settings = {
                 </div>
                 </div>
 
+                <div id="settings-panel-users" class="settings-subpanel mb-2 hidden">
+                <div class="bg-white p-6 rounded-lg shadow-sm border border-slate-200 max-w-4xl">
+                    <h3 class="text-lg font-bold text-slate-800 mb-1">Benutzerverwaltung</h3>
+                    <p class="text-xs text-slate-500 mb-3">Nur sichtbar als <strong>ADMIN</strong>. Rollen: <code class="bg-slate-100 px-1 rounded">ADMIN</code> (volle API-Rechte), <code class="bg-slate-100 px-1 rounded">STAFF</code> (eingeschränkt). Der letzte aktive Admin kann nicht deaktiviert, herabgestuft oder gelöscht werden.</p>
+                    <p id="admin-users-msg" class="text-xs min-h-[1.25rem] mb-2"></p>
+                    <div class="overflow-x-auto border border-slate-200 rounded-lg">
+                        <table class="w-full text-sm text-left">
+                            <thead class="bg-slate-50 text-slate-700">
+                                <tr>
+                                    <th class="p-2 font-semibold">Benutzer</th>
+                                    <th class="p-2 font-semibold">Rolle</th>
+                                    <th class="p-2 font-semibold">Aktiv</th>
+                                    <th class="p-2 font-semibold">Neues Passwort</th>
+                                    <th class="p-2 font-semibold w-40">Aktionen</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-users-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div class="mt-6 border-t border-slate-200 pt-4">
+                        <h4 class="text-sm font-bold text-slate-800 mb-2">Neuen Benutzer anlegen</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-2 items-end">
+                            <div class="lg:col-span-2">
+                                <label class="block text-xs text-slate-600 mb-0.5">Benutzername</label>
+                                <input type="text" id="admin-new-username" class="w-full border rounded p-2 text-sm" autocomplete="off" maxlength="80">
+                            </div>
+                            <div class="lg:col-span-2">
+                                <label class="block text-xs text-slate-600 mb-0.5">Passwort (min. 8 Zeichen)</label>
+                                <input type="password" id="admin-new-password" class="w-full border rounded p-2 text-sm" autocomplete="new-password">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-slate-600 mb-0.5">Rolle</label>
+                                <select id="admin-new-role" class="w-full border rounded p-2 text-sm">
+                                    <option value="STAFF">STAFF</option>
+                                    <option value="ADMIN">ADMIN</option>
+                                </select>
+                            </div>
+                            <div class="md:col-span-2 lg:col-span-1">
+                                <button type="button" onclick="ImmoApp.settings.createAdminUser()" class="w-full bg-slate-700 text-white px-3 py-2 rounded text-sm font-bold hover:bg-slate-800">Anlegen</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                </div>
+
                 <div id="settings-panel-danger" class="settings-subpanel mb-2 hidden">
                 <div class="bg-red-50 p-6 rounded-lg shadow-sm border border-red-200">
                     <h3 class="text-lg font-bold text-red-800 mb-2">🚨 Gefahrenzone: Daten gezielt löschen (Reset)</h3>
@@ -268,7 +335,7 @@ window.ImmoApp.settings = {
 
     /** Wechselt die Kategorien oben (Server, Backup, Google, …). */
     switchSettingsTab: function (tab) {
-        const ids = ["server", "backup", "google", "brief", "danger"];
+        const ids = ["server", "backup", "google", "brief", "users", "danger"];
         ids.forEach(function (t) {
             const panel = document.getElementById("settings-panel-" + t);
             const btn = document.getElementById("settings-tab-" + t);
@@ -285,6 +352,205 @@ window.ImmoApp.settings = {
         try {
             localStorage.setItem("immo_settings_subtab", tab);
         } catch (e) {}
+        if (tab === "users") {
+            ImmoApp.settings.loadAdminUsersTable();
+        }
+    },
+
+    /** Tab „Benutzer“ nur bei API-Login als ADMIN. */
+    updateUserAdminTabVisibility: async function () {
+        const btn = document.getElementById("settings-tab-users");
+        if (!btn || !ImmoApp.api) return;
+        let show = false;
+        if (ImmoApp.api.getToken() && ImmoApp.api.useApiData && ImmoApp.api.useApiData()) {
+            try {
+                const me = await ImmoApp.api.me();
+                show = !!(me && me.role === "ADMIN");
+            } catch (e) {
+                show = false;
+            }
+        }
+        btn.classList.toggle("hidden", !show);
+        if (!show) {
+            try {
+                if (localStorage.getItem("immo_settings_subtab") === "users") {
+                    ImmoApp.settings.switchSettingsTab("server");
+                }
+            } catch (e2) {}
+        }
+    },
+
+    loadAdminUsersTable: async function () {
+        const tbody = document.getElementById("admin-users-tbody");
+        const msg = document.getElementById("admin-users-msg");
+        if (!tbody || !ImmoApp.api || !ImmoApp.api.useApiData || !ImmoApp.api.useApiData()) {
+            if (msg) msg.textContent = "";
+            return;
+        }
+        if (msg) {
+            msg.textContent = "Lade …";
+            msg.className = "text-xs min-h-[1.25rem] mb-2 text-slate-600";
+        }
+        try {
+            const me = await ImmoApp.api.me();
+            if (!me || me.role !== "ADMIN") {
+                if (msg) msg.textContent = "";
+                tbody.innerHTML = "";
+                return;
+            }
+            const rows = await ImmoApp.api.listAdminUsers();
+            tbody.innerHTML = "";
+            rows.forEach(function (r) {
+                const id = Number(r.id);
+                const isSelf = me.id === id;
+                const active = r.is_active === 1 || r.is_active === true || r.is_active === "1";
+                const tr = document.createElement("tr");
+                tr.className = "border-t border-slate-100";
+                tr.dataset.userId = String(id);
+                const roleSel =
+                    '<select class="admin-user-role border rounded p-1.5 text-sm w-full max-w-[9rem]" data-user-id="' +
+                    id +
+                    '">' +
+                    '<option value="STAFF"' +
+                    (String(r.role_code) === "STAFF" ? " selected" : "") +
+                    ">STAFF</option>" +
+                    '<option value="ADMIN"' +
+                    (String(r.role_code) === "ADMIN" ? " selected" : "") +
+                    ">ADMIN</option></select>";
+                const activeCb =
+                    '<input type="checkbox" class="admin-user-active w-4 h-4 rounded" data-user-id="' +
+                    id +
+                    '" ' +
+                    (active ? "checked" : "") +
+                    (isSelf ? " disabled title=\"Eigenes Konto\"" : "") +
+                    ">";
+                const pwIn =
+                    '<input type="password" class="admin-user-pw border rounded p-1.5 text-xs w-full max-w-[11rem]" placeholder="optional" data-user-id="' +
+                    id +
+                    '" autocomplete="new-password">';
+                const delBtn =
+                    '<button type="button" class="text-red-700 text-xs font-bold hover:underline px-1" data-del-user="' +
+                    id +
+                    '"' +
+                    (isSelf ? " disabled" : "") +
+                    ">Löschen</button>";
+                tr.innerHTML =
+                    "<td class=\"p-2 align-middle font-mono text-xs\">" +
+                    (r.username || "") +
+                    (isSelf ? ' <span class="text-slate-400">(du)</span>' : "") +
+                    "</td><td class=\"p-2 align-middle\">" +
+                    roleSel +
+                    "</td><td class=\"p-2 align-middle\">" +
+                    activeCb +
+                    "</td><td class=\"p-2 align-middle\">" +
+                    pwIn +
+                    "</td><td class=\"p-2 align-middle whitespace-nowrap\">" +
+                    '<button type="button" class="bg-slate-600 text-white px-2 py-1 rounded text-xs font-bold hover:bg-slate-700 mr-1" data-save-user="' +
+                    id +
+                    '">Speichern</button>' +
+                    delBtn +
+                    "</td>";
+                tbody.appendChild(tr);
+            });
+            tbody.querySelectorAll("[data-save-user]").forEach(function (b) {
+                b.addEventListener("click", function () {
+                    const uid = parseInt(b.getAttribute("data-save-user"), 10);
+                    ImmoApp.settings.saveAdminUserRow(uid);
+                });
+            });
+            tbody.querySelectorAll("[data-del-user]").forEach(function (b) {
+                b.addEventListener("click", function () {
+                    const uid = parseInt(b.getAttribute("data-del-user"), 10);
+                    ImmoApp.settings.deleteAdminUserRow(uid);
+                });
+            });
+            if (msg) msg.textContent = rows.length ? "" : "Keine Benutzer.";
+        } catch (e) {
+            if (msg) {
+                msg.textContent = e.message || String(e);
+                msg.className = "text-xs min-h-[1.25rem] mb-2 text-red-700";
+            }
+            tbody.innerHTML = "";
+        }
+    },
+
+    saveAdminUserRow: async function (userId) {
+        const msg = document.getElementById("admin-users-msg");
+        const tr = document.querySelector("#admin-users-tbody tr[data-user-id=\"" + userId + '"]');
+        if (!tr || !ImmoApp.api) return;
+        const roleEl = tr.querySelector(".admin-user-role");
+        const actEl = tr.querySelector(".admin-user-active");
+        const pwEl = tr.querySelector(".admin-user-pw");
+        const body = {
+            role: roleEl ? roleEl.value : undefined,
+            is_active: actEl ? actEl.checked : undefined
+        };
+        const pw = pwEl && String(pwEl.value).trim() ? String(pwEl.value).trim() : "";
+        if (pw) body.password = pw;
+        try {
+            await ImmoApp.api.patchAdminUser(userId, body);
+            if (pwEl) pwEl.value = "";
+            if (msg) {
+                msg.textContent = "Gespeichert.";
+                msg.className = "text-xs min-h-[1.25rem] mb-2 text-emerald-700";
+            }
+            await ImmoApp.settings.loadAdminUsersTable();
+            await ImmoApp.settings.updateUserAdminTabVisibility();
+        } catch (e) {
+            if (msg) {
+                msg.textContent = e.message || String(e);
+                msg.className = "text-xs min-h-[1.25rem] mb-2 text-red-700";
+            }
+        }
+    },
+
+    deleteAdminUserRow: async function (userId) {
+        if (!confirm("Benutzer wirklich löschen?")) return;
+        const msg = document.getElementById("admin-users-msg");
+        try {
+            await ImmoApp.api.deleteAdminUser(userId);
+            if (msg) {
+                msg.textContent = "Benutzer gelöscht.";
+                msg.className = "text-xs min-h-[1.25rem] mb-2 text-emerald-700";
+            }
+            await ImmoApp.settings.loadAdminUsersTable();
+        } catch (e) {
+            if (msg) {
+                msg.textContent = e.message || String(e);
+                msg.className = "text-xs min-h-[1.25rem] mb-2 text-red-700";
+            }
+        }
+    },
+
+    createAdminUser: async function () {
+        const msg = document.getElementById("admin-users-msg");
+        const u = document.getElementById("admin-new-username");
+        const p = document.getElementById("admin-new-password");
+        const r = document.getElementById("admin-new-role");
+        if (!u || !p || !r || !ImmoApp.api) return;
+        const username = String(u.value || "").trim();
+        const password = String(p.value || "");
+        const role = r.value || "STAFF";
+        if (!username) {
+            alert("Benutzername eingeben.");
+            return;
+        }
+        if (password.length < 8) {
+            alert("Passwort mindestens 8 Zeichen.");
+            return;
+        }
+        try {
+            await ImmoApp.api.createAdminUser({ username: username, password: password, role: role });
+            u.value = "";
+            p.value = "";
+            if (msg) {
+                msg.textContent = "Benutzer angelegt.";
+                msg.className = "text-xs min-h-[1.25rem] mb-2 text-emerald-700";
+            }
+            await ImmoApp.settings.loadAdminUsersTable();
+        } catch (e) {
+            alert(e.message || String(e));
+        }
     },
 
     fillDockerApiUrl: function() {
@@ -349,6 +615,7 @@ window.ImmoApp.settings = {
             dockStat.className = "text-xs text-slate-600 font-mono min-h-[1.25rem] whitespace-pre-wrap break-all";
         }
         await this.refreshApiMeStatus();
+        await this.updateUserAdminTabVisibility();
         const expHint = document.getElementById("export-api-hint");
         if (expHint) {
             const show = !!(ImmoApp.api.useApiData && ImmoApp.api.useApiData());
@@ -386,6 +653,7 @@ window.ImmoApp.settings = {
         try {
             await ImmoApp.api.login(u, p);
             await this.refreshApiMeStatus();
+            await this.updateUserAdminTabVisibility();
             alert("Anmeldung ok.");
         } catch (e) {
             alert(e.message || "Login fehlgeschlagen");
@@ -394,12 +662,17 @@ window.ImmoApp.settings = {
 
     apiLogout: async function() {
         if (!ImmoApp.api) return;
+        const apiModeOn = ImmoApp.api.isApiMode && ImmoApp.api.isApiMode();
         try {
             await ImmoApp.api.logout();
             await this.refreshApiMeStatus();
         } catch (e) {
             ImmoApp.api.setToken("");
             await this.refreshApiMeStatus();
+        }
+        await this.updateUserAdminTabVisibility();
+        if (apiModeOn && ImmoApp.api.isApiMode && ImmoApp.api.isApiMode()) {
+            location.reload();
         }
     },
 
@@ -789,6 +1062,82 @@ window.ImmoApp.settings = {
             }
         };
         reader.readAsText(fileInput.files[0]);
+    },
+
+    /**
+     * Einmaliger Upload lokaler IndexedDB → API-Server (expliziter Klick).
+     * Kein automatischer Sync; ohne diesen Aufruf bleibt der Server beim rein lokalen Arbeiten unverändert.
+     */
+    runLocalToServerSync: async function () {
+        const st = document.getElementById("sync-local-status");
+        const setSt = function (t) {
+            if (st) st.textContent = t || "";
+        };
+        if (!ImmoApp.api) {
+            alert("API-Client fehlt.");
+            return;
+        }
+        if (!ImmoApp.db || !ImmoApp.db.instance) {
+            alert("Datenbank nicht bereit.");
+            return;
+        }
+        const base =
+            (ImmoApp.api.baseUrl || "").trim() ||
+            (typeof localStorage !== "undefined" && localStorage.getItem("immo_api_base_url")) ||
+            "";
+        if (!base) {
+            alert("Bitte im Tab „Server & API“ eine API-Base-URL eintragen und speichern.");
+            return;
+        }
+        if (!ImmoApp.api.getToken()) {
+            alert("Bitte zuerst im Tab „Server & API“ anmelden (API-Login).");
+            return;
+        }
+        if (base && (!ImmoApp.api.baseUrl || !String(ImmoApp.api.baseUrl).trim())) {
+            ImmoApp.api.setBaseUrl(base);
+        }
+        const allowNonEmpty = document.getElementById("sync-allow-nonempty-server")?.checked === true;
+        const warn =
+            "Die lokalen Daten werden auf den Server geschrieben (neue IDs).\n\n" +
+            (allowNonEmpty
+                ? "Der Server enthält möglicherweise schon Daten — es können Duplikate entstehen.\n\n"
+                : "") +
+            "Fortfahren?";
+        if (!confirm(warn)) return;
+        setSt("Übertragung läuft …");
+        try {
+            const result = await ImmoApp.api.syncLocalIndexedDbToServer(
+                ImmoApp.db.instance,
+                { allowNonEmptyServer: allowNonEmpty },
+                function (msg) {
+                    setSt(msg);
+                }
+            );
+            const c = result.created || {};
+            const lines = [
+                "Erstellt auf dem Server:",
+                "Objekte: " + (c.properties || 0),
+                "Mieter: " + (c.tenants || 0),
+                "Buchungen: " + (c.transactions || 0),
+                "Nebenkosten: " + (c.utilities || 0),
+                "Wartung: " + (c.maintenance || 0),
+                "Zähler: " + (c.meters || 0),
+                "Tarife: " + (c.tariffs || 0),
+                "Ablesungen: " + (c.meterReadings || 0),
+                "Dokumente: " + (c.documents || 0)
+            ];
+            const err = result.errors || [];
+            if (err.length) {
+                lines.push("", "Hinweise/Fehler (" + err.length + "):", err.slice(0, 12).join("\n"));
+                if (err.length > 12) lines.push("… und " + (err.length - 12) + " weitere (Konsole).");
+                console.warn("syncLocalToServer errors", err);
+            }
+            alert(lines.join("\n"));
+            setSt("Abgeschlossen. Bei Fehlern siehe Meldung und Konsole.");
+        } catch (e) {
+            setSt("");
+            alert(e.message || String(e));
+        }
     },
 
     // --- Google Drive Sync (Basis, ohne Verschlüsselung) ---

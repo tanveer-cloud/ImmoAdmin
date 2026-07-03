@@ -21,6 +21,11 @@ window.ImmoApp.search = {
                         <ul class="space-y-2" id="list-search-maintenance"></ul>
                     </div>
 
+                    <div id="search-results-utilities" class="hidden">
+                        <h3 class="text-lg font-bold border-b-2 border-indigo-200 pb-2 mb-4 text-indigo-800">📄 Nebenkosten</h3>
+                        <ul class="space-y-2" id="list-search-utilities"></ul>
+                    </div>
+
                     <div id="search-no-results" class="hidden text-gray-500 italic p-6 bg-white rounded-lg border text-center shadow-sm">
                         Keine passenden Einträge in der Datenbank gefunden.
                     </div>
@@ -51,19 +56,22 @@ window.ImmoApp.search = {
         let props;
         let trans;
         let maintRows;
+        let utils;
 
         if (ImmoApp.api && ImmoApp.api.useApiData()) {
             try {
-                const [tn, pr, tr, mr] = await Promise.all([
+                const [tn, pr, tr, mr, ur] = await Promise.all([
                     ImmoApp.api.getTenants({ limit: 500 }),
                     ImmoApp.api.getProperties({ limit: 500 }),
                     ImmoApp.api.getTransactions({ limit: 8000 }),
-                    ImmoApp.api.getMaintenance({ limit: 5000 })
+                    ImmoApp.api.getMaintenance({ limit: 5000 }),
+                    ImmoApp.api.getUtilities({ limit: 5000 })
                 ]);
                 tenants = (tn.data || []).map(ImmoApp.api.mapTenantFromApi);
                 props = (pr.data || []).map(ImmoApp.api.mapPropertyFromApi);
                 trans = (tr.data || []).map(ImmoApp.api.mapTransactionFromApi);
                 maintRows = (mr.data || []).map(ImmoApp.api.mapMaintenanceFromApi);
+                utils = (ur.data || []).map(ImmoApp.api.mapUtilityFromApi);
             } catch (e) {
                 alert(e.message || "API-Suche fehlgeschlagen.");
                 return;
@@ -75,6 +83,7 @@ window.ImmoApp.search = {
             maintRows = db.tables.find(t => t.name === "maintenance")
                 ? await db.table("maintenance").toArray()
                 : [];
+            utils = db.utilities ? await db.utilities.toArray() : [];
         }
 
         const matchedTenants = tenants.filter(t =>
@@ -101,22 +110,31 @@ window.ImmoApp.search = {
             (m.task || "").toLowerCase().includes(query)
         );
 
-        this.renderResults(matchedTenants, matchedTrans, matchedMaint, props);
+        const matchedUtils = utils.filter(u =>
+            (u.name && u.name.toLowerCase().includes(query)) ||
+            (u.category && String(u.category).toLowerCase().includes(query)) ||
+            (u.year && String(u.year).includes(query))
+        );
+
+        this.renderResults(matchedTenants, matchedTrans, matchedMaint, matchedUtils, props);
     },
 
-    renderResults: function(tenants, trans, maint, props) {
+    renderResults: function(tenants, trans, maint, utils, props) {
         const elTenants = document.getElementById('search-results-tenants');
         const elTrans = document.getElementById('search-results-transactions');
         const elMaint = document.getElementById('search-results-maintenance');
+        const elUtils = document.getElementById('search-results-utilities');
         const elNoRes = document.getElementById('search-no-results');
 
         const listTenants = document.getElementById('list-search-tenants');
         const listTrans = document.getElementById('list-search-transactions');
         const listMaint = document.getElementById('list-search-maintenance');
+        const listUtils = document.getElementById('list-search-utilities');
 
         listTenants.innerHTML = '';
         listTrans.innerHTML = '';
         listMaint.innerHTML = '';
+        if (listUtils) listUtils.innerHTML = '';
 
         let hasResults = false;
 
@@ -126,10 +144,12 @@ window.ImmoApp.search = {
             elTenants.classList.remove('hidden');
             tenants.forEach(t => {
                 const propName = props.find(p => p.id === t.propertyId)?.name || 'Kein Objekt';
+                const formerBadge = ImmoApp.utils.isFormerTenant(t.moveIn, t.moveOut)
+                    ? `<span class="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded ml-1">Ehemalig</span>` : '';
                 listTenants.innerHTML += `
                     <li class="bg-white p-4 rounded-lg shadow-sm border border-gray-100 hover:shadow-md transition flex justify-between items-center">
                         <div>
-                            <strong class="text-blue-700 text-lg">${t.name}</strong>
+                            <strong class="text-blue-700 text-lg">${t.name}</strong>${formerBadge}
                             <span class="text-sm text-gray-500 ml-2 bg-gray-100 px-2 py-0.5 rounded">🏠 ${propName}</span>
                             <div class="text-xs text-gray-400 mt-1">Soll-Miete: ${ImmoApp.ui.formatCurrency(t.rent)} | IBAN: ${t.iban || '-'}</div>
                         </div>
@@ -184,6 +204,24 @@ window.ImmoApp.search = {
                 `;
             });
         } else elMaint.classList.add('hidden');
+
+        if (utils.length > 0 && elUtils && listUtils) {
+            hasResults = true;
+            elUtils.classList.remove('hidden');
+            utils.slice(0, 40).forEach(u => {
+                const propName = props.find(p => p.id === u.propertyId)?.name || '';
+                listUtils.innerHTML += `
+                    <li class="bg-white p-3 rounded-lg shadow-sm border border-gray-100 hover:bg-gray-50 flex justify-between items-center text-sm">
+                        <div>
+                            <strong class="text-indigo-800">${u.name || '—'}</strong>
+                            ${propName ? `<span class="text-xs text-gray-500 ml-2">🏠 ${propName}</span>` : ''}
+                            <span class="text-xs text-gray-400 block mt-1">Jahr ${u.year || '—'}</span>
+                        </div>
+                        <span class="font-bold text-gray-800">${ImmoApp.ui.formatCurrency(u.amount)}</span>
+                    </li>
+                `;
+            });
+        } else if (elUtils) elUtils.classList.add('hidden');
 
         // Keine Ergebnisse
         if(!hasResults) elNoRes.classList.remove('hidden');

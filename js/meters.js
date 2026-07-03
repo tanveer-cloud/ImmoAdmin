@@ -187,10 +187,8 @@ window.ImmoApp.meters = {
     },
 
     loadDistributionMode: async function() {
-        if (!ImmoApp.db || !ImmoApp.db.instance) return;
         try {
-            const r = await ImmoApp.db.instance.settings.get("wgDistributionMode");
-            const val = (r && r.value) || "PERSON_DAYS";
+            const val = await ImmoApp.api.getUiSetting("wgDistributionMode", "PERSON_DAYS");
             const radio = document.querySelector('input[name="wg-dist-mode"][value="' + val + '"]');
             if (radio) radio.checked = true;
         } catch (e) { /* ignore */ }
@@ -198,8 +196,8 @@ window.ImmoApp.meters = {
 
     saveDistributionMode: async function() {
         const radio = document.querySelector('input[name="wg-dist-mode"]:checked');
-        if (!radio || !ImmoApp.db || !ImmoApp.db.instance) return;
-        await ImmoApp.db.instance.settings.put({ key: "wgDistributionMode", value: radio.value });
+        if (!radio) return;
+        await ImmoApp.api.setUiSetting("wgDistributionMode", radio.value);
         alert("Verteilungsart gespeichert.");
     },
 
@@ -485,7 +483,7 @@ window.ImmoApp.meters = {
         const tenants = await this._loadTenantsForPropertyMeter(meter.propertyId);
         const periodStart = new Date(start);
         const periodEnd = new Date(end);
-        const mode = (await db.settings.get("wgDistributionMode"))?.value || "PERSON_DAYS";
+        const mode = await ImmoApp.api.getUiSetting("wgDistributionMode", "PERSON_DAYS");
 
         const shares = [];
         let totalWeight = 0;

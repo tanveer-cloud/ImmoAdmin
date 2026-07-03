@@ -521,6 +521,7 @@ __________________________
             periodEnd: params.periodEnd || "",
             title: String(params.title || "").slice(0, 200),
             fileNameSafe: fileName,
+            content: contentText,
             driveFileId,
             driveWebViewLink,
             driveModifiedTime,
@@ -674,7 +675,7 @@ __________________________
         let property;
         let mode;
         let allTenantsInProp;
-        mode = (await db.settings.get("wgDistributionMode"))?.value || "PERSON_DAYS";
+        mode = await ImmoApp.api.getUiSetting("wgDistributionMode", "PERSON_DAYS");
 
         if (useApiStmt) {
             if (propId) {
@@ -1066,7 +1067,7 @@ Hinweistext (editierbar):
         const utilsForProp = allUtils.filter(u => (u.propertyId != null && propId != null && u.propertyId === propId));
 
         const totalCosts = utilsForProp.reduce((sum, u) => sum + (parseFloat(u.amount) || 0), 0);
-        const mode = (await db.settings.get("wgDistributionMode"))?.value || "PERSON_DAYS";
+        const mode = await ImmoApp.api.getUiSetting("wgDistributionMode", "PERSON_DAYS");
         let allTenantsInProp = [];
         if (propId) {
             if (useApi) {
@@ -1522,9 +1523,13 @@ Hinweistext (editierbar):
                 docsListEl.innerHTML = docs.map(d => {
                     const when = d.createdAt ? new Date(d.createdAt).toLocaleString('de-DE') : '-';
                     const label = d.docType === "NK" ? "NK-Abrechnung" : "Anschreiben";
+                    const useApiDocs = ImmoApp.api && ImmoApp.api.useApiData();
+                    const serverBtn = useApiDocs && d.id
+                        ? `<button type="button" onclick="ImmoApp.api.downloadDocumentLatest(${d.id}, '${String(d.fileNameSafe || "dokument.bin").replace(/'/g, "\\'")}')" class="text-xs bg-slate-700 text-white px-2 py-1 rounded hover:bg-slate-800">Vom Server</button>`
+                        : "";
                     const driveBtn = d.driveWebViewLink
                         ? `<a href="${d.driveWebViewLink}" target="_blank" rel="noopener noreferrer" class="text-xs bg-indigo-600 text-white px-2 py-1 rounded hover:bg-indigo-700">In Drive öffnen</a>`
-                        : `<span class="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">Nur lokal</span>`;
+                        : (useApiDocs ? "" : `<span class="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">Nur lokal</span>`);
                     return `
                         <div class="bg-white border border-indigo-100 rounded p-2 flex items-center justify-between gap-2">
                             <div class="min-w-0">
@@ -1533,6 +1538,7 @@ Hinweistext (editierbar):
                                 <div class="text-[11px] text-gray-400">${when}</div>
                             </div>
                             <div class="flex items-center gap-2 shrink-0">
+                                ${serverBtn}
                                 ${driveBtn}
                             </div>
                         </div>
@@ -1543,10 +1549,28 @@ Hinweistext (editierbar):
         document.getElementById('modal-tenant-history').classList.remove('hidden');
     },
 
-    showPropertyModal: async function(id = '', name = '', totalRooms = '') {
+    showPropertyModal: async function(id = '', name = '', totalRooms = '', billingGroupId = '') {
         document.getElementById('modal-prop-id').value = id;
-        document.getElementById('modal-prop-name').value = name;
-        
+        if (id && (ImmoApp.api && ImmoApp.api.useApiData())) {
+            try {
+                const row = await ImmoApp.api.getProperty(id);
+                if (row) {
+                    name = row.name || name;
+                    totalRooms = row.total_rooms != null ? String(row.total_rooms) : '';
+                    billingGroupId = row.billing_group_id || '';
+                }
+            } catch (e) {
+                console.warn(e);
+            }
+        } else if (id) {
+            const p = await ImmoApp.db.instance.properties.get(parseInt(id, 10));
+            if (p) {
+                name = p.name || name;
+                totalRooms = p.totalRooms != null ? String(p.totalRooms) : '';
+                billingGroupId = p.billingGroupId || '';
+            }
+        }
+
         let contentHtml = document.getElementById('modal-property-content');
         if(!contentHtml) {
             const modalBody = document.querySelector('#modal-property .space-y-3');
@@ -1556,16 +1580,23 @@ Hinweistext (editierbar):
                         <label class="block text-sm font-medium">Name / Adresse (z.B. Forststraße 18)</label>
                         <input type="text" id="modal-prop-name" class="w-full border p-2 rounded">
                     </div>
-                    <div>
+                    <div class="mb-3">
                         <label class="block text-sm font-medium">Anzahl der Zimmer (für WG-Leerstands-Radar)</label>
                         <input type="number" id="modal-prop-rooms" class="w-full border p-2 rounded" placeholder="z.B. 4">
                         <p class="text-xs text-gray-500 mt-1">Lass es leer, wenn es eine normale Wohnung ist.</p>
                     </div>
+                    <div>
+                        <label class="block text-sm font-medium">Abrechnungsgruppe (Haus)</label>
+                        <input type="text" id="modal-prop-billing-group" class="w-full border p-2 rounded" placeholder="z.B. forststr-18">
+                        <p class="text-xs text-gray-500 mt-1">Gleicher Wert für alle Objekte eines Hauses (WG + Wohnungen). Für hausweite NK nötig.</p>
+                    </div>
                 </div>
             `;
-            document.getElementById('modal-prop-name').value = name;
         }
+        document.getElementById('modal-prop-name').value = name;
         document.getElementById('modal-prop-rooms').value = totalRooms || '';
+        const bgEl = document.getElementById('modal-prop-billing-group');
+        if (bgEl) bgEl.value = billingGroupId || '';
         document.getElementById('modal-property').classList.remove('hidden');
     },
 
@@ -1574,16 +1605,31 @@ Hinweistext (editierbar):
         const id = document.getElementById('modal-prop-id').value;
         const name = document.getElementById('modal-prop-name').value;
         const totalRooms = document.getElementById('modal-prop-rooms').value;
+        const billingGroupRaw = document.getElementById('modal-prop-billing-group')?.value || '';
+        const billingGroupId = billingGroupRaw.trim() || null;
         
         if(!name) return alert("Der Name des Objekts darf nicht leer sein.");
 
         try {
             if (ImmoApp.api && ImmoApp.api.useApiData()) {
-                const body = { name: name.trim(), total_rooms: totalRooms ? parseInt(totalRooms, 10) : null };
-                if (id) await ImmoApp.api.patchProperty(id, body);
-                else await ImmoApp.api.postProperty(body);
+                const body = {
+                    name: name.trim(),
+                    total_rooms: totalRooms ? parseInt(totalRooms, 10) : null,
+                    billing_group_id: billingGroupId
+                };
+                if (id) {
+                    const row = await ImmoApp.api.getProperty(id);
+                    if (row && row.updated_at) body.updated_at = row.updated_at;
+                    await ImmoApp.api.patchProperty(id, body);
+                } else {
+                    await ImmoApp.api.postProperty(body);
+                }
             } else {
-                const data = { name, totalRooms: totalRooms ? parseInt(totalRooms) : null };
+                const data = {
+                    name,
+                    totalRooms: totalRooms ? parseInt(totalRooms) : null,
+                    billingGroupId: billingGroupId
+                };
                 if(id) await db.properties.update(parseInt(id), data);
                 else await db.properties.add(data);
             }
@@ -1594,6 +1640,32 @@ Hinweistext (editierbar):
         document.getElementById('modal-property').classList.add('hidden');
         this.render();
         if(window.ImmoApp.dashboard) ImmoApp.dashboard.render();
+    },
+
+    deleteProperty: async function (id, name) {
+        if (!id) return;
+        const label = name || ("Objekt #" + id);
+        if (!confirm('Objekt „' + label + '“ wirklich löschen? Nur möglich ohne zugeordnete Mieter.')) return;
+        try {
+            if (ImmoApp.api && ImmoApp.api.useApiData()) {
+                if (!ImmoApp.api.isAdmin()) {
+                    alert("Nur Administratoren dürfen Objekte löschen.");
+                    return;
+                }
+                await ImmoApp.api.deleteProperty(id);
+            } else {
+                const cnt = await ImmoApp.db.instance.tenants.where("propertyId").equals(parseInt(id, 10)).count();
+                if (cnt > 0) {
+                    alert("Objekt hat noch Mieter. Bitte zuerst Mieter löschen oder umziehen.");
+                    return;
+                }
+                await ImmoApp.db.instance.properties.delete(parseInt(id, 10));
+            }
+            this.render();
+            if (window.ImmoApp.dashboard) ImmoApp.dashboard.render();
+        } catch (e) {
+            alert((e && e.message) || "Löschen fehlgeschlagen");
+        }
     },
 
     showTenantModal: async function(tenantId = null, defaultName = '', defaultIban = '', defaultDate = '', defaultRent = '') {
@@ -1891,8 +1963,16 @@ Hinweistext (editierbar):
                     sqm: sqm,
                     rent_history: rentHistory.length > 0 ? rentHistory : null
                 };
-                if (id) await ImmoApp.api.patchTenant(parseInt(id, 10), apiBody);
-                else await ImmoApp.api.postTenant(apiBody);
+                if (id) {
+                    await ImmoApp.api.patchWithUpdatedAt(
+                        ImmoApp.api.getTenant.bind(ImmoApp.api),
+                        ImmoApp.api.patchTenant.bind(ImmoApp.api),
+                        parseInt(id, 10),
+                        apiBody
+                    );
+                } else {
+                    await ImmoApp.api.postTenant(apiBody);
+                }
             } else {
                 if (id) await db.tenants.update(parseInt(id), data);
                 else await db.tenants.add(data);
@@ -1951,15 +2031,20 @@ Hinweistext (editierbar):
         }
 
         propList.innerHTML = "";
+        const canDeleteProp = !(ImmoApp.api && ImmoApp.api.useApiData()) || ImmoApp.api.isAdmin();
         props.forEach(p => {
             const roomBadge = p.totalRooms ? `<span class="bg-gray-200 text-xs px-2 py-1 rounded ml-2">${p.totalRooms} Zimmer (WG)</span>` : '';
+            const groupBadge = p.billingGroupId ? `<span class="bg-indigo-100 text-indigo-800 text-xs px-2 py-1 rounded ml-2">Gruppe: ${String(p.billingGroupId).replace(/</g, '')}</span>` : '';
             propList.innerHTML += `
                 <li class="px-4 py-3 flex justify-between items-center hover:bg-gray-50">
                     <div>
                         <span class="font-bold text-gray-700">${p.name}</span>
-                        ${roomBadge}
+                        ${roomBadge}${groupBadge}
                     </div>
-                    <button onclick="ImmoApp.tenants.showPropertyModal(${p.id}, '${p.name}', '${p.totalRooms || ''}')" class="text-blue-600 text-xs bg-blue-50 px-2 py-1 rounded">Bearbeiten</button>
+                    <div class="flex gap-1 shrink-0">
+                    <button type="button" onclick="ImmoApp.tenants.showPropertyModal(${p.id})" class="text-blue-600 text-xs bg-blue-50 px-2 py-1 rounded">Bearbeiten</button>
+                    ${canDeleteProp ? `<button type="button" onclick="ImmoApp.tenants.deleteProperty(${p.id}, '${String(p.name || "").replace(/'/g, "\\'")}')" class="text-red-600 text-xs bg-red-50 px-2 py-1 rounded">Löschen</button>` : ""}
+                    </div>
                 </li>
             `;
         });
@@ -1990,7 +2075,8 @@ Hinweistext (editierbar):
             const moveInFormat = t.moveIn ? new Date(t.moveIn).toLocaleDateString('de-DE') : '-';
             const moveOutFormat = t.moveOut ? new Date(t.moveOut).toLocaleDateString('de-DE') : 'Aktiv';
             
-            const isActive = ImmoApp.utils.getActiveMonthsInYear(t.moveIn, t.moveOut, currentYear) > 0;
+            const isFormer = ImmoApp.utils.isFormerTenant(t.moveIn, t.moveOut);
+            const isActive = !isFormer && ImmoApp.utils.getActiveMonthsInYear(t.moveIn, t.moveOut, currentYear) > 0;
             
             const base = t.baseRent !== undefined ? t.baseRent : t.rent;
             const prep = t.prepayment || 0;

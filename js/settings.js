@@ -153,10 +153,20 @@ window.ImmoApp.settings = {
                                 <input type="checkbox" id="sync-allow-nonempty-server" class="mt-0.5 w-4 h-4 rounded border-amber-400">
                                 <span>Server darf schon Daten enthalten — trotzdem alles aus dem Browser <strong>zusätzlich</strong> anlegen (kann Duplikate erzeugen; nur wenn du dir sicher bist).</span>
                             </label>
+                            <label class="flex items-start gap-2 mt-2 text-xs text-amber-950 cursor-pointer">
+                                <input type="checkbox" id="sync-skip-duplicates" class="mt-0.5 w-4 h-4 rounded border-amber-400" checked>
+                                <span><strong>Duplikate überspringen</strong> — erkennt bereits vorhandene Objekte/Mieter/Buchungen etc. auf dem Server (nach Name/Datum/Betrag/Checksum) und legt sie nicht erneut an.</span>
+                            </label>
+                            <p id="sync-local-preview" class="text-xs text-amber-950 mt-3 whitespace-pre-wrap hidden bg-amber-100/60 border border-amber-300 rounded p-3 font-mono"></p>
                             <p id="sync-local-status" class="text-xs font-mono text-amber-950 mt-3 min-h-[1.25rem] whitespace-pre-wrap"></p>
-                            <button type="button" onclick="ImmoApp.settings.runLocalToServerSync()" class="mt-3 bg-amber-700 text-white px-4 py-2.5 rounded-lg font-bold text-sm hover:bg-amber-800 transition w-full sm:w-auto">
+                            <div class="mt-3 flex flex-wrap gap-2">
+                            <button type="button" onclick="ImmoApp.settings.runLocalToServerPreview()" class="bg-amber-100 text-amber-950 border border-amber-400 px-4 py-2.5 rounded-lg font-bold text-sm hover:bg-amber-200 transition">
+                                Vorschau (Zähler)
+                            </button>
+                            <button type="button" onclick="ImmoApp.settings.runLocalToServerSync()" class="bg-amber-700 text-white px-4 py-2.5 rounded-lg font-bold text-sm hover:bg-amber-800 transition">
                                 Jetzt lokale Daten zum Server übertragen
                             </button>
+                            </div>
                         </div>
                     </div>
 
@@ -271,6 +281,13 @@ window.ImmoApp.settings = {
                     <h3 class="text-lg font-bold text-slate-800 mb-1">Benutzerverwaltung</h3>
                     <p class="text-xs text-slate-500 mb-3">Nur sichtbar als <strong>ADMIN</strong>. Rollen: <code class="bg-slate-100 px-1 rounded">ADMIN</code> (volle API-Rechte), <code class="bg-slate-100 px-1 rounded">STAFF</code> (eingeschränkt). Der letzte aktive Admin kann nicht deaktiviert, herabgestuft oder gelöscht werden.</p>
                     <p id="admin-users-msg" class="text-xs min-h-[1.25rem] mb-2"></p>
+                    <div class="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                        <div class="flex flex-wrap items-center gap-2 mb-2">
+                            <h4 class="text-sm font-bold text-slate-800">Server-Statistik</h4>
+                            <button type="button" onclick="ImmoApp.settings.refreshAdminStats()" class="text-xs bg-slate-700 text-white px-2 py-1 rounded font-bold hover:bg-slate-800">Aktualisieren</button>
+                        </div>
+                        <pre id="admin-server-stats" class="text-[11px] font-mono text-slate-700 whitespace-pre-wrap">—</pre>
+                    </div>
                     <div class="overflow-x-auto border border-slate-200 rounded-lg">
                         <table class="w-full text-sm text-left">
                             <thead class="bg-slate-50 text-slate-700">
@@ -380,6 +397,35 @@ window.ImmoApp.settings = {
         }
     },
 
+    refreshAdminStats: async function () {
+        const el = document.getElementById("admin-server-stats");
+        if (!el || !ImmoApp.api || !ImmoApp.api.useApiData()) return;
+        el.textContent = "Lade …";
+        try {
+            const me = await ImmoApp.api.me();
+            if (!me || me.role !== "ADMIN") {
+                el.textContent = "Nur für ADMIN.";
+                return;
+            }
+            const s = await ImmoApp.api.getAdminStats();
+            if (!s) {
+                el.textContent = "Keine Daten.";
+                return;
+            }
+            const e = s.entities || {};
+            const j = s.jobs || {};
+            el.textContent = [
+                "Mieter: " + (e.tenants || 0) + " | Objekte: " + (e.properties || 0),
+                "Buchungen: " + (e.transactions || 0) + " | Dokumente: " + (e.documents || 0),
+                "Jobs: queued=" + (j.queued || 0) + " failed=" + (j.failed || 0),
+                "Login-Fehler (15m): " + (s.login_failures_15m != null ? s.login_failures_15m : "—"),
+                "Sessions aktiv: " + (s.active_sessions || 0)
+            ].join("\n");
+        } catch (err) {
+            el.textContent = err.message || String(err);
+        }
+    },
+
     loadAdminUsersTable: async function () {
         const tbody = document.getElementById("admin-users-tbody");
         const msg = document.getElementById("admin-users-msg");
@@ -399,6 +445,7 @@ window.ImmoApp.settings = {
                 return;
             }
             const rows = await ImmoApp.api.listAdminUsers();
+            await ImmoApp.settings.refreshAdminStats();
             tbody.innerHTML = "";
             rows.forEach(function (r) {
                 const id = Number(r.id);
@@ -1068,6 +1115,86 @@ window.ImmoApp.settings = {
      * Einmaliger Upload lokaler IndexedDB → API-Server (expliziter Klick).
      * Kein automatischer Sync; ohne diesen Aufruf bleibt der Server beim rein lokalen Arbeiten unverändert.
      */
+    runLocalToServerPreview: async function () {
+        const prev = document.getElementById("sync-local-preview");
+        const setPrev = function (t, show) {
+            if (!prev) return;
+            prev.textContent = t || "";
+            if (show) prev.classList.remove("hidden");
+            else prev.classList.add("hidden");
+        };
+        if (!ImmoApp.api || !ImmoApp.db || !ImmoApp.db.instance) {
+            alert("API oder Datenbank nicht bereit.");
+            return;
+        }
+        const base =
+            (ImmoApp.api.baseUrl || "").trim() ||
+            (typeof localStorage !== "undefined" && localStorage.getItem("immo_api_base_url")) ||
+            "";
+        if (!base) {
+            alert("Bitte API-Base-URL im Tab „Server & API“ setzen.");
+            return;
+        }
+        if (!ImmoApp.api.getToken()) {
+            alert("Bitte zuerst anmelden.");
+            return;
+        }
+        if (base && (!ImmoApp.api.baseUrl || !String(ImmoApp.api.baseUrl).trim())) {
+            ImmoApp.api.setBaseUrl(base);
+        }
+        const allowNonEmpty = document.getElementById("sync-allow-nonempty-server")?.checked === true;
+        setPrev("Lade Vorschau …", true);
+        try {
+            const p = await ImmoApp.api.previewLocalToServerSync(ImmoApp.db.instance, {
+                allowNonEmptyServer: allowNonEmpty
+            });
+            const lines = [
+                "── Lokal (Browser) ──",
+                "Objekte: " + p.local.properties,
+                "Mieter: " + p.local.tenants,
+                "Buchungen: " + p.local.transactions,
+                "Nebenkosten: " + p.local.utilities,
+                "Wartung: " + p.local.maintenance,
+                "Zähler: " + p.local.meters,
+                "Tarife: " + p.local.tariffs,
+                "Ablesungen: " + p.local.meterReadings,
+                "Dokumente (Metadaten): " + p.local.documents,
+                "",
+                "── Server (aktuell) ──",
+                "Objekte: " + p.server.properties,
+                "Mieter: " + p.server.tenants,
+                "Buchungen: " + p.server.transactions,
+                "Nebenkosten: " + p.server.utilities,
+                "Wartung: " + p.server.maintenance,
+                "Zähler: " + p.server.meters,
+                "Tarife: " + p.server.tariffs,
+                "Ablesungen: " + p.server.meterReadings,
+                "Dokumente: " + p.server.documents
+            ];
+            if (p.duplicates) {
+                const d = p.duplicates;
+                lines.push(
+                    "",
+                    "── Vorauss. Duplikate (bei „überspringen“) ──",
+                    "Objekte: " + d.properties,
+                    "Mieter: " + d.tenants,
+                    "Buchungen: " + d.transactions,
+                    "Nebenkosten: " + d.utilities,
+                    "Dokumente: " + d.documents
+                );
+            }
+            if (p.warnings && p.warnings.length) {
+                lines.push("", "── Hinweise ──", ...p.warnings);
+            }
+            if (p.blocked) lines.push("", "Status: Upload derzeit BLOCKIERT (siehe Hinweise).");
+            else lines.push("", "Status: Upload möglich (nach Bestätigung).");
+            setPrev(lines.join("\n"), true);
+        } catch (e) {
+            setPrev("");
+            alert(e.message || String(e));
+        }
+    },
+
     runLocalToServerSync: async function () {
         const st = document.getElementById("sync-local-status");
         const setSt = function (t) {
@@ -1097,6 +1224,7 @@ window.ImmoApp.settings = {
             ImmoApp.api.setBaseUrl(base);
         }
         const allowNonEmpty = document.getElementById("sync-allow-nonempty-server")?.checked === true;
+        const skipDuplicates = document.getElementById("sync-skip-duplicates")?.checked !== false;
         const warn =
             "Die lokalen Daten werden auf den Server geschrieben (neue IDs).\n\n" +
             (allowNonEmpty
@@ -1108,12 +1236,13 @@ window.ImmoApp.settings = {
         try {
             const result = await ImmoApp.api.syncLocalIndexedDbToServer(
                 ImmoApp.db.instance,
-                { allowNonEmptyServer: allowNonEmpty },
+                { allowNonEmptyServer: allowNonEmpty, skipDuplicates: skipDuplicates },
                 function (msg) {
                     setSt(msg);
                 }
             );
             const c = result.created || {};
+            const sk = result.skippedDuplicates || {};
             const lines = [
                 "Erstellt auf dem Server:",
                 "Objekte: " + (c.properties || 0),
@@ -1124,7 +1253,14 @@ window.ImmoApp.settings = {
                 "Zähler: " + (c.meters || 0),
                 "Tarife: " + (c.tariffs || 0),
                 "Ablesungen: " + (c.meterReadings || 0),
-                "Dokumente: " + (c.documents || 0)
+                "Dokumente: " + (c.documents || 0),
+                "",
+                "Übersprungen (Duplikate):",
+                "Objekte: " + (sk.properties || 0),
+                "Mieter: " + (sk.tenants || 0),
+                "Buchungen: " + (sk.transactions || 0),
+                "Nebenkosten: " + (sk.utilities || 0),
+                "Dokumente: " + (sk.documents || 0)
             ];
             const err = result.errors || [];
             if (err.length) {
@@ -1483,6 +1619,21 @@ window.ImmoApp.settings = {
 
         if (ImmoApp.api && ImmoApp.api.useApiData()) {
             try {
+                const fullContent = payload.content != null && String(payload.content) !== ""
+                    ? String(payload.content)
+                    : (record.localCacheRef && record.localCacheRef.length > 100 ? record.localCacheRef : "");
+                if (fullContent && record.checksum) {
+                    const verRes = await ImmoApp.api.postDocumentVersion({
+                        title: record.title || "Dokument",
+                        docType: record.docType,
+                        content: fullContent,
+                        fileNameSafe: record.fileNameSafe || "document.txt",
+                        tenantId: record.tenantId,
+                        propertyId: record.propertyId,
+                        year: record.year
+                    });
+                    return verRes?.data?.documentId != null ? verRes.data.documentId : null;
+                }
                 const apiBody = ImmoApp.api.documentRecordToCreateBody(record);
                 if (record.checksum && record.tenantId) {
                     const ex = await ImmoApp.api.findDocumentDuplicateForTenant(

@@ -190,13 +190,10 @@ window.ImmoApp.utilities = {
     },
 
     getUtilityAssignmentRules: async function() {
-        const db = ImmoApp.db.instance;
-        const r = await db.settings.get("utilityAssignmentRules");
-        try { return r && r.value ? JSON.parse(r.value) : {}; } catch (e) { return {}; }
+        return await ImmoApp.api.getUiSettingJson("utilityAssignmentRules", {});
     },
 
     saveUtilityAssignmentRule: async function(namePart, update) {
-        const db = ImmoApp.db.instance;
         const rules = await this.getUtilityAssignmentRules();
         namePart = (namePart || "").trim();
         if (!namePart) return;
@@ -204,7 +201,7 @@ window.ImmoApp.utilities = {
         if (update.propertyId !== undefined) rules[namePart].propertyId = update.propertyId;
         if (update.category !== undefined) rules[namePart].category = update.category;
         if (update.splitKey !== undefined) rules[namePart].splitKey = update.splitKey;
-        await db.settings.put({ key: "utilityAssignmentRules", value: JSON.stringify(rules) });
+        await ImmoApp.api.setUiSettingJson("utilityAssignmentRules", rules);
     },
 
     _useApiData: function () {
@@ -238,6 +235,7 @@ window.ImmoApp.utilities = {
         if ((u.propertyId == null || u.propertyId === '') && rule.propertyId != null) upd.propertyId = rule.propertyId;
         if ((!u.category || u.category === '') && rule.category) upd.category = rule.category;
         if ((!u.splitKey || u.splitKey === '') && rule.splitKey) upd.splitKey = rule.splitKey;
+        if ((!u.allocationScope || u.allocationScope === '') && rule.allocationScope) upd.allocationScope = rule.allocationScope;
         if (Object.keys(upd).length) {
             if (this._useApiData()) {
                 try {
@@ -254,12 +252,133 @@ window.ImmoApp.utilities = {
         return u;
     },
 
+    _utilityAppliesToProperty: function(u, propId, property, allProps) {
+        const scope = (u.allocationScope || "property").toLowerCase();
+        if (scope === "building") {
+            if (!property || !property.billingGroupId) return false;
+            const refProp = allProps.find(function (p) { return p.id === u.propertyId; });
+            return !!(refProp && refProp.billingGroupId === property.billingGroupId);
+        }
+        return u.propertyId === propId;
+    },
+
+    _calcPropertyUnitDaysInYear: function(tenantsOnProperty, yearNum, periodStart, periodEnd) {
+        const yStart = new Date(yearNum, 0, 1);
+        const yEnd = new Date(yearNum, 11, 31);
+        const from = new Date(Math.max(yStart.getTime(), periodStart.getTime()));
+        const to = new Date(Math.min(yEnd.getTime(), periodEnd.getTime()));
+        if (to <= from) return 0;
+        let count = 0;
+        for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+            const dayMs = d.getTime();
+            const occupied = tenantsOnProperty.some(function (t) {
+                const mi = t.moveIn ? new Date(t.moveIn) : new Date(0);
+                const mo = t.moveOut ? new Date(t.moveOut) : new Date(8640000000000000);
+                mi.setHours(0, 0, 0, 0);
+                mo.setHours(23, 59, 59, 999);
+                return dayMs >= mi.getTime() && dayMs <= mo.getTime();
+            });
+            if (occupied) count++;
+        }
+        return count;
+    },
+
+    _calcUtilityShareForTenant: function(u, property, targetTenant, allTenantsOnProperty, allProps, allTenantsAll, yearNum, periodStart, periodEnd, helpers) {
+        const key = u.splitKey;
+        const scope = (u.allocationScope || "property").toLowerCase();
+        const normSqm = helpers.normSqm;
+        const normPersons = helpers.normPersons;
+        const calcOverlapDaysInYear = helpers.calcOverlapDaysInYear;
+        const getActiveMonthsInPeriodForTenantYear = helpers.getActiveMonthsInPeriodForTenantYear;
+        const targetDays = calcOverlapDaysInYear(targetTenant, yearNum);
+        if (targetDays <= 0) return 0;
+        if (key === "WG" || key === "DIRECT") return 0;
+
+        const activeOnProperty = allTenantsOnProperty.filter(function (t) {
+            return getActiveMonthsInPeriodForTenantYear(t, yearNum).length > 0;
+        });
+
+        if (scope === "building" && property.billingGroupId) {
+            const groupProps = allProps.filter(function (p) {
+                return p.billingGroupId === property.billingGroupId;
+            });
+            let totalGroupUnitDays = 0;
+            let propUnitDays = 0;
+            groupProps.forEach(function (gp) {
+                const tOnP = allTenantsAll.filter(function (t) { return t.propertyId === gp.id; });
+                const days = this._calcPropertyUnitDaysInYear(tOnP, yearNum, periodStart, periodEnd);
+                totalGroupUnitDays += days;
+                if (gp.id === property.id) propUnitDays = days;
+            }, this);
+            if (totalGroupUnitDays <= 0) return 0;
+            const propertyShare = u.amount * (propUnitDays / totalGroupUnitDays);
+
+            if (key === "UNITS") {
+                if (property.totalRooms && property.totalRooms > 0) {
+                    let totalPersonDays = 0;
+                    activeOnProperty.forEach(function (t) {
+                        totalPersonDays += normPersons(t.persons) * calcOverlapDaysInYear(t, yearNum);
+                    });
+                    const myPersonDays = normPersons(targetTenant.persons) * targetDays;
+                    return propertyShare * (myPersonDays / (totalPersonDays || 1));
+                }
+                return propertyShare;
+            }
+            if (key === "PERSONS") {
+                let totalPersonDays = 0;
+                groupProps.forEach(function (gp) {
+                    allTenantsAll.filter(function (t) { return t.propertyId === gp.id; }).forEach(function (t) {
+                        const d = calcOverlapDaysInYear(t, yearNum);
+                        if (d > 0) totalPersonDays += normPersons(t.persons) * d;
+                    });
+                });
+                const myPersonDays = normPersons(targetTenant.persons) * targetDays;
+                return u.amount * (myPersonDays / (totalPersonDays || 1));
+            }
+            if (key === "SQM") {
+                let totalSqmDays = 0;
+                groupProps.forEach(function (gp) {
+                    allTenantsAll.filter(function (t) { return t.propertyId === gp.id; }).forEach(function (t) {
+                        const d = calcOverlapDaysInYear(t, yearNum);
+                        if (d > 0) totalSqmDays += normSqm(t.sqm) * d;
+                    });
+                });
+                const mySqmDays = normSqm(targetTenant.sqm) * targetDays;
+                return u.amount * (mySqmDays / (totalSqmDays || 1));
+            }
+            return propertyShare;
+        }
+
+        if (key === "SQM") {
+            let totalSqmDays = 0;
+            activeOnProperty.forEach(function (t) {
+                totalSqmDays += normSqm(t.sqm) * calcOverlapDaysInYear(t, yearNum);
+            });
+            const mySqmDays = normSqm(targetTenant.sqm) * targetDays;
+            return u.amount * (mySqmDays / (totalSqmDays || 1));
+        }
+        if (key === "PERSONS" || (key === "UNITS" && property.totalRooms && property.totalRooms > 0)) {
+            let totalPersonDays = 0;
+            activeOnProperty.forEach(function (t) {
+                totalPersonDays += normPersons(t.persons) * calcOverlapDaysInYear(t, yearNum);
+            });
+            const myPersonDays = normPersons(targetTenant.persons) * targetDays;
+            return u.amount * (myPersonDays / (totalPersonDays || 1));
+        }
+        if (key === "UNITS") {
+            const propUnitDays = this._calcPropertyUnitDaysInYear(activeOnProperty, yearNum, periodStart, periodEnd);
+            return u.amount * (targetDays / (propUnitDays || 1));
+        }
+        return 0;
+    },
+
     updateUtil: async function(utilId, field, value) {
         const db = ImmoApp.db.instance;
         let updateData = {};
         if (field === "propertyId") updateData.propertyId = value ? parseInt(value, 10) : null;
         if (field === "category") updateData.category = value;
         if (field === "splitKey") updateData.splitKey = value;
+        if (field === "allocationScope") updateData.allocationScope = value === "building" ? "building" : "property";
         try {
             if (this._useApiData()) {
                 await ImmoApp.api.patchUtility(utilId, ImmoApp.api.utilityLocalPatchToApiBody(updateData));
@@ -417,7 +536,10 @@ window.ImmoApp.utilities = {
         // Wenn ein spezielles Objekt gewählt ist, filtere!
         if(currentSelection && currentSelection !== "ALL") {
             const pid = parseInt(currentSelection);
-            utils = utils.filter(u => u.propertyId === pid);
+            const selProp = props.find(function (p) { return p.id === pid; });
+            utils = utils.filter(function (u) {
+                return ImmoApp.utilities._utilityAppliesToProperty(u, pid, selProp, props);
+            });
             allTenants = allTenants.filter(t => t.propertyId === pid);
         }
 
@@ -561,6 +683,10 @@ window.ImmoApp.utilities = {
 
             const catColor = (!u.category || !u.splitKey) ? 'border-red-300 bg-red-50' : 'bg-white';
 
+            const scopeColor = (u.allocationScope === "building") ? "border-indigo-300 bg-indigo-50" : "bg-white";
+            let scopeOpts = `<option value="property" ${(!u.allocationScope || u.allocationScope === "property") ? "selected" : ""}>Nur Objekt</option>`;
+            scopeOpts += `<option value="building" ${u.allocationScope === "building" ? "selected" : ""}>Ganzes Haus</option>`;
+
             tbody.innerHTML += `
                 <tr class="hover:bg-gray-50 border-b">
                     <td class="px-4 py-3 align-top">
@@ -569,8 +695,11 @@ window.ImmoApp.utilities = {
                     </td>
                     <td class="px-4 py-3 text-right font-bold text-gray-800 align-top">${ImmoApp.ui.formatCurrency(u.amount)}</td>
                     <td class="px-4 py-3 align-top">
-                        <select onchange="ImmoApp.utilities.updateUtil(${u.id}, 'propertyId', this.value)" class="border rounded p-1 text-xs w-full ${propColor}">
+                        <select onchange="ImmoApp.utilities.updateUtil(${u.id}, 'propertyId', this.value)" class="border rounded p-1 text-xs w-full ${propColor} mb-1">
                             ${propOpts}
+                        </select>
+                        <select onchange="ImmoApp.utilities.updateUtil(${u.id}, 'allocationScope', this.value)" class="border rounded p-1 text-xs w-full ${scopeColor}" title="Ganzes Haus = alle Objekte mit gleicher Abrechnungsgruppe">
+                            ${scopeOpts}
                         </select>
                     </td>
                     <td class="px-4 py-3 align-top flex gap-2">
@@ -596,8 +725,11 @@ window.ImmoApp.utilities = {
                         </div>
                         <div class="mt-3">
                             <label class="block text-[11px] font-bold text-gray-500 mb-1">Objekt-Zuweisung</label>
-                            <select onchange="ImmoApp.utilities.updateUtil(${u.id}, 'propertyId', this.value)" class="border rounded p-2 text-xs w-full ${propColor}">
+                            <select onchange="ImmoApp.utilities.updateUtil(${u.id}, 'propertyId', this.value)" class="border rounded p-2 text-xs w-full ${propColor} mb-2">
                                 ${propOpts}
+                            </select>
+                            <select onchange="ImmoApp.utilities.updateUtil(${u.id}, 'allocationScope', this.value)" class="border rounded p-2 text-xs w-full ${scopeColor}">
+                                ${scopeOpts}
                             </select>
                         </div>
                         <div class="mt-3 grid grid-cols-1 gap-2">
@@ -849,31 +981,36 @@ window.ImmoApp.utilities = {
             let targetTenant;
             let allUtils;
             let allTenants;
+            let allPropsList;
+            let allTenantsAll;
             if (this._useApiData()) {
-                const [prow, trow] = await Promise.all([
+                const [prow, trow, propsRes, tenantsRes] = await Promise.all([
                     ImmoApp.api.getProperty(propId),
-                    ImmoApp.api.getTenant(tenantId)
+                    ImmoApp.api.getTenant(tenantId),
+                    ImmoApp.api.getProperties({ limit: 500 }),
+                    ImmoApp.api.getTenants({ limit: 500 })
                 ]);
                 property = prow ? ImmoApp.api.mapPropertyFromApi(prow) : null;
                 targetTenant = trow ? ImmoApp.api.mapTenantFromApi(trow) : null;
+                allPropsList = (propsRes.data || []).map(ImmoApp.api.mapPropertyFromApi);
+                allTenantsAll = (tenantsRes.data || []).map(ImmoApp.api.mapTenantFromApi);
                 const utilsMapped = await this._loadAllUtilitiesMapped();
                 const yearSet = {};
                 yearsToInclude.forEach(function (ys) { yearSet[String(ys)] = true; });
-                allUtils = utilsMapped.filter(function (u) {
-                    return u.propertyId === propId && yearSet[String(u.year)];
-                });
-                const tr = await ImmoApp.api.getTenants({ limit: 500 });
-                allTenants = (tr.data || []).map(ImmoApp.api.mapTenantFromApi).filter(function (t) { return t.propertyId === propId; });
+                allUtils = utilsMapped.filter(function (u) { return yearSet[String(u.year)]; });
+                allTenants = allTenantsAll.filter(function (t) { return t.propertyId === propId; });
             } else {
                 const db = ImmoApp.db.instance;
                 property = await db.properties.get(propId);
                 targetTenant = await db.tenants.get(tenantId);
+                allPropsList = await db.properties.toArray();
+                allTenantsAll = await db.tenants.toArray();
                 allUtils = [];
                 for (const yStr of yearsToInclude) {
-                    const arr = await db.utilities.where("year").equals(yStr).filter(function (u) { return u.propertyId === propId; }).toArray();
+                    const arr = await db.utilities.where("year").equals(yStr).toArray();
                     allUtils.push(...arr);
                 }
-                allTenants = await db.tenants.where("propertyId").equals(propId).toArray();
+                allTenants = allTenantsAll.filter(function (t) { return t.propertyId === propId; });
             }
 
             const sender = (ImmoApp.settings && ImmoApp.settings.getSenderConfig) ? await ImmoApp.settings.getSenderConfig() : {};
@@ -896,7 +1033,10 @@ window.ImmoApp.utilities = {
                 return;
             }
 
-        const uncategorized = allUtils.filter(u => !u.category || !u.splitKey);
+        const uncategorized = allUtils.filter(function (u) {
+            return ImmoApp.utilities._utilityAppliesToProperty(u, propId, property, allPropsList)
+                && (!u.category || !u.splitKey);
+        });
         if(uncategorized.length > 0) {
             alert(`Achtung: Es gibt ${uncategorized.length} Kostenpunkte ohne Kategorie oder Schlüssel! Gehe zu Tab 1 und trage diese nach.`);
             return;
@@ -943,59 +1083,33 @@ window.ImmoApp.utilities = {
 
         for(const yStr of yearsToInclude) {
             const yearNum = parseInt(yStr, 10);
-            const yearUtils = allUtils.filter(u => String(u.year) === yStr);
-
-            const yearGroupedUtils = {};
-            yearUtils.forEach(u => {
-                if(!yearGroupedUtils[u.category]) yearGroupedUtils[u.category] = { amount: 0, key: u.splitKey };
-                yearGroupedUtils[u.category].amount += u.amount;
-            });
-
-            // Gewichte für Schlüssel innerhalb des Jahres (aber nur im gewählten Zeitraum)
-            let totalSqmDays = 0, totalPersonDays = 0, totalUnitDays = 0;
-            const activeTenants = allTenants.map(t => ({ ...t }))
-                .filter(t => getActiveMonthsInPeriodForTenantYear(t, yearNum).length > 0);
-
-            activeTenants.forEach(t => {
-                const days = calcOverlapDaysInYear(t, yearNum);
-                if(days <= 0) return;
-                totalSqmDays += normSqm(t.sqm) * days;
-                totalPersonDays += normPersons(t.persons) * days;
-                totalUnitDays += 1 * days;
+            const yearUtils = allUtils.filter(function (u) {
+                return String(u.year) === yStr
+                    && ImmoApp.utilities._utilityAppliesToProperty(u, propId, property, allPropsList);
             });
 
             const targetMonthsYear = getActiveMonthsInPeriodForTenantYear(targetTenant, yearNum).length;
             totalTargetMonths += targetMonthsYear;
-            const expectedPrepaymentYearFactor = targetMonthsYear;
 
-            // Kosten (aus dem Jahr) auf den Mieter umlegen
-            const targetDays = calcOverlapDaysInYear(targetTenant, yearNum);
-            for(const [category, data] of Object.entries(yearGroupedUtils)) {
-                let myShare = 0;
-                if (data.key === 'WG') {
-                    continue;
-                } else if (data.key === 'DIRECT') {
-                    myShare = 0;
-                } else if (data.key === 'SQM') {
-                    const mySqmDays = normSqm(targetTenant.sqm) * targetDays;
-                    const fraction = mySqmDays / (totalSqmDays || 1);
-                    myShare = data.amount * fraction;
-                } else if (data.key === 'PERSONS') {
-                    const myPersonDays = normPersons(targetTenant.persons) * targetDays;
-                    const fraction = myPersonDays / (totalPersonDays || 1);
-                    myShare = data.amount * fraction;
-                } else if (data.key === 'UNITS') {
-                    const myUnitDays = 1 * targetDays;
-                    const fraction = myUnitDays / (totalUnitDays || 1);
-                    myShare = data.amount * fraction;
-                }
+            const helpers = {
+                normSqm: normSqm,
+                normPersons: normPersons,
+                calcOverlapDaysInYear: calcOverlapDaysInYear,
+                getActiveMonthsInPeriodForTenantYear: getActiveMonthsInPeriodForTenantYear
+            };
 
-                if(!categoryAmountTotal[category]) categoryAmountTotal[category] = 0;
-                if(!categoryMyShareTotal[category]) categoryMyShareTotal[category] = 0;
-                categoryAmountTotal[category] += data.amount;
-                categoryMyShareTotal[category] += myShare;
+            yearUtils.forEach(function (u) {
+                if (!u.category || !u.splitKey) return;
+                const myShare = ImmoApp.utilities._calcUtilityShareForTenant(
+                    u, property, targetTenant, allTenants, allPropsList, allTenantsAll,
+                    yearNum, periodStart, periodEnd, helpers
+                );
+                if (!categoryAmountTotal[u.category]) categoryAmountTotal[u.category] = 0;
+                if (!categoryMyShareTotal[u.category]) categoryMyShareTotal[u.category] = 0;
+                categoryAmountTotal[u.category] += u.amount;
+                categoryMyShareTotal[u.category] += myShare;
                 totalTenantCost += myShare;
-            }
+            });
         }
 
         const expectedPrepayment = (parseFloat(targetTenant.prepayment) || 0) * totalTargetMonths;
@@ -1254,6 +1368,7 @@ ${paymentDefault}
                     docType: "NK",
                     title: `Nebenkostenabrechnung ${year} – ${tenantName}`,
                     fileNameSafe: `${safeBase}.html`,
+                    content: html,
                     driveFileId,
                     driveWebViewLink,
                     driveModifiedTime,

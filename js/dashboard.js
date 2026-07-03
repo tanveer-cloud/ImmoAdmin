@@ -1,6 +1,28 @@
 window.ImmoApp = window.ImmoApp || {};
 
 window.ImmoApp.utils = {
+    isFormerTenant: function(moveInStr, moveOutStr, refDate) {
+        if (!moveOutStr) return false;
+        const mo = new Date(moveOutStr);
+        if (isNaN(mo.getTime())) return false;
+        mo.setHours(0, 0, 0, 0);
+        const ref = refDate ? new Date(refDate) : new Date();
+        ref.setHours(0, 0, 0, 0);
+        return mo <= ref;
+    },
+
+    isCurrentlyResident: function(moveInStr, moveOutStr, refDate) {
+        if (ImmoApp.utils.isFormerTenant(moveInStr, moveOutStr, refDate)) return false;
+        const ref = refDate ? new Date(refDate) : new Date();
+        ref.setHours(0, 0, 0, 0);
+        const mi = moveInStr ? new Date(moveInStr) : new Date(2000, 0, 1);
+        const mo = moveOutStr ? new Date(moveOutStr) : new Date(2099, 11, 31);
+        if (isNaN(mi.getTime()) || isNaN(mo.getTime())) return true;
+        mi.setHours(0, 0, 0, 0);
+        mo.setHours(23, 59, 59, 999);
+        return ref >= mi && ref <= mo;
+    },
+
     getActiveMonthsInYear: function(moveInStr, moveOutStr, targetYear) {
         const year = parseInt(targetYear);
         const yearStart = new Date(year, 0, 1);
@@ -302,9 +324,7 @@ window.ImmoApp.dashboard = {
             if(p.totalRooms && p.totalRooms > 0) {
                 const currentlyActive = allTenants.filter(t => {
                     if(t.propertyId !== p.id) return false;
-                    const inDate = t.moveIn ? new Date(t.moveIn) : new Date('2000-01-01');
-                    const outDate = t.moveOut ? new Date(t.moveOut) : new Date('2099-12-31');
-                    return (today >= inDate && today <= outDate);
+                    return ImmoApp.utils.isCurrentlyResident(t.moveIn, t.moveOut, today);
                 });
                 
                 const emptyRooms = p.totalRooms - currentlyActive.length;

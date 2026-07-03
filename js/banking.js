@@ -125,6 +125,104 @@ window.ImmoApp.banking = {
         return ImmoApp.db.instance.tenants.toArray();
     },
 
+    _loadPropertiesBanking: async function () {
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            const res = await ImmoApp.api.getProperties({ limit: 500 });
+            return (res.data || []).map(ImmoApp.api.mapPropertyFromApi);
+        }
+        return ImmoApp.db.instance.properties.toArray();
+    },
+
+    _loadUtilitiesBanking: async function () {
+        if (ImmoApp.api && ImmoApp.api.useApiData()) {
+            const res = await ImmoApp.api.getUtilities({ limit: 5000 });
+            return (res.data || []).map(ImmoApp.api.mapUtilityFromApi);
+        }
+        return ImmoApp.db.instance.utilities.toArray();
+    },
+
+    _utilityNameFromTx: function (tx) {
+        return (tx.name || "") + " - " + (tx.purpose || "");
+    },
+
+    _findLinkedUtility: function (tx, utilities) {
+        const utilName = this._utilityNameFromTx(tx);
+        const utilAmount = Math.abs(Number(tx.amount) || 0);
+        const yearStr = String(tx.year != null ? tx.year : "");
+        const matches = (utilities || []).filter(function (u) {
+            return u.name === utilName
+                && Math.abs(Number(u.amount) - utilAmount) < 0.005
+                && String(u.year) === yearStr;
+        });
+        return matches.length ? matches[0] : null;
+    },
+
+    _defaultSplitKeyForProperty: function (propertyId, properties) {
+        const p = (properties || []).find(function (x) { return x.id === parseInt(String(propertyId), 10); });
+        return (p && p.totalRooms && p.totalRooms > 0) ? "PERSONS" : null;
+    },
+
+    updateUtilityPropertyForTx: async function (txId, propertyId) {
+        const tx = await this._getTx(txId);
+        if (!tx || String(tx.category).toUpperCase() !== "UTILITY") return;
+        const utilName = this._utilityNameFromTx(tx);
+        const utilAmount = Math.abs(Number(tx.amount) || 0);
+        const yearStr = String(tx.year != null ? tx.year : "");
+        const propId = propertyId ? parseInt(String(propertyId), 10) : null;
+        const properties = await this._loadPropertiesBanking();
+        const splitKey = propId ? this._defaultSplitKeyForProperty(propId, properties) : null;
+
+        try {
+            if (ImmoApp.api && ImmoApp.api.useApiData()) {
+                const utilities = await this._loadUtilitiesBanking();
+                let linked = this._findLinkedUtility(tx, utilities);
+                if (!linked) {
+                    await ImmoApp.api.postUtility({
+                        name: utilName,
+                        amount: utilAmount,
+                        year_value: yearStr,
+                        property_id: propId,
+                        allocation_scope: "property",
+                        category: null,
+                        split_key: splitKey
+                    });
+                } else {
+                    await ImmoApp.api.patchUtility(linked.id, ImmoApp.api.utilityLocalPatchToApiBody({
+                        propertyId: propId,
+                        allocationScope: "property",
+                        splitKey: splitKey
+                    }));
+                }
+            } else {
+                const db = ImmoApp.db.instance;
+                const utilities = await db.utilities.toArray();
+                let linked = this._findLinkedUtility(tx, utilities.map(function (u) {
+                    return Object.assign({}, u, { year: String(u.year) });
+                }));
+                if (!linked) {
+                    await db.utilities.add({
+                        name: utilName,
+                        amount: utilAmount,
+                        year: yearStr,
+                        propertyId: propId,
+                        allocationScope: "property",
+                        splitKey: splitKey
+                    });
+                } else {
+                    await db.utilities.update(linked.id, {
+                        propertyId: propId,
+                        allocationScope: "property",
+                        splitKey: splitKey
+                    });
+                }
+            }
+        } catch (e) {
+            alert(e.message || "Objekt-Zuweisung fehlgeschlagen");
+            return;
+        }
+        if (window.ImmoApp.utilities) ImmoApp.utilities.renderCosts();
+    },
+
     _loadTxsForYear: async function (currentYear) {
         if (ImmoApp.api && ImmoApp.api.useApiData()) {
             const res = await ImmoApp.api.getTransactions({ limit: 8000, page: 1 });
@@ -419,7 +517,16 @@ window.ImmoApp.banking = {
     },
 
     // Die Update Funktion wurde angepasst, damit sie mit dem schnellen KI-Loop funktioniert
-    updateCategory: async function(txId, category, tenantId = null, skipRender = false) {
+    updateCategory: async function(txId, category, tenantId = null, opts) {
+        let skipRender = false;
+        let utilityPropertyId = null;
+        if (typeof opts === "boolean") {
+            skipRender = opts;
+        } else if (opts && typeof opts === "object") {
+            skipRender = !!opts.skipRender;
+            utilityPropertyId = opts.utilityPropertyId != null && opts.utilityPropertyId !== ""
+                ? parseInt(String(opts.utilityPropertyId), 10) : null;
+        }
         const db = ImmoApp.db.instance;
         const tx = await this._getTx(txId);
         if (!tx) {
@@ -427,6 +534,13 @@ window.ImmoApp.banking = {
             return;
         }
         const oldCategory = tx.category;
+        const properties = await this._loadPropertiesBanking();
+        let resolvedPropId = utilityPropertyId;
+        if (String(category).toUpperCase() === "UTILITY" && !resolvedPropId && tenantId) {
+            const t = (await this._loadTenantsBanking()).find(function (x) { return x.id === parseInt(String(tenantId), 10); });
+            if (t && t.propertyId) resolvedPropId = t.propertyId;
+        }
+        const splitKey = resolvedPropId ? this._defaultSplitKeyForProperty(resolvedPropId, properties) : null;
 
         if (ImmoApp.api && ImmoApp.api.useApiData()) {
             try {
@@ -439,7 +553,7 @@ window.ImmoApp.banking = {
                 return;
             }
 
-            const utilName = (tx.name || "") + " - " + (tx.purpose || "");
+            const utilName = this._utilityNameFromTx(tx);
             const utilAmount = Math.abs(Number(tx.amount) || 0);
             const yearStr = String(tx.year != null ? tx.year : "");
 
@@ -459,10 +573,17 @@ window.ImmoApp.banking = {
                         name: utilName,
                         amount: utilAmount,
                         year_value: yearStr,
-                        property_id: null,
+                        property_id: resolvedPropId,
+                        allocation_scope: "property",
                         category: null,
-                        split_key: null
+                        split_key: splitKey
                     });
+                } else if (resolvedPropId) {
+                    await ImmoApp.api.patchUtility(matches[0].id, ImmoApp.api.utilityLocalPatchToApiBody({
+                        propertyId: resolvedPropId,
+                        allocationScope: "property",
+                        splitKey: splitKey
+                    }));
                 }
             }
 
@@ -483,20 +604,32 @@ window.ImmoApp.banking = {
             });
 
             if (category === "UTILITY") {
-                const exists = await db.utilities.where({ name: tx.name + " - " + tx.purpose, amount: Math.abs(tx.amount) }).count();
+                const utilName = this._utilityNameFromTx(tx);
+                const exists = await db.utilities.where({ name: utilName, amount: Math.abs(tx.amount) }).count();
                 if (exists === 0) {
                     await db.utilities.add({
-                        name: tx.name + " - " + tx.purpose,
+                        name: utilName,
                         amount: Math.abs(tx.amount),
                         year: tx.year,
-                        propertyId: null
+                        propertyId: resolvedPropId,
+                        allocationScope: "property",
+                        splitKey: splitKey
                     });
+                } else if (resolvedPropId) {
+                    const row = await db.utilities.where({ name: utilName, amount: Math.abs(tx.amount), year: tx.year }).first();
+                    if (row) {
+                        await db.utilities.update(row.id, {
+                            propertyId: resolvedPropId,
+                            allocationScope: "property",
+                            splitKey: splitKey
+                        });
+                    }
                 }
             }
 
             if (oldCategory === "UTILITY" && category !== "UTILITY") {
                 const candidates = await db.utilities.where({
-                    name: tx.name + " - " + tx.purpose,
+                    name: this._utilityNameFromTx(tx),
                     amount: Math.abs(tx.amount),
                     year: tx.year
                 }).toArray();
@@ -509,6 +642,7 @@ window.ImmoApp.banking = {
         if (!skipRender) {
             this.render();
             if(window.ImmoApp.dashboard) ImmoApp.dashboard.render();
+            if (window.ImmoApp.utilities) ImmoApp.utilities.renderCosts();
         }
     },
 
@@ -666,9 +800,13 @@ window.ImmoApp.banking = {
 
         let txs;
         let tenants;
+        let properties;
+        let utilities;
         try {
             txs = await this._loadTxsForYear(currentYear);
             tenants = await this._loadTenantsBanking();
+            properties = await this._loadPropertiesBanking();
+            utilities = await this._loadUtilitiesBanking();
         } catch (e) {
             const tbody = document.getElementById("banking-table-body");
             const cardsContainer = document.getElementById("banking-cards");
@@ -739,6 +877,18 @@ window.ImmoApp.banking = {
             selectHtml += `<option value="" data-cat="IGNORE" ${tx.category === 'IGNORE' ? 'selected' : ''}>🗑️ Ignorieren / Privat</option>`;
             selectHtml += `</select>`;
 
+            let utilPropHtml = "";
+            if (tx.category === "UTILITY") {
+                const linked = this._findLinkedUtility(tx, utilities);
+                const selPropId = linked && linked.propertyId ? linked.propertyId : "";
+                utilPropHtml = `<select onchange="ImmoApp.banking.updateUtilityPropertyForTx(${tx.id}, this.value)" class="w-full border rounded p-1 text-xs mt-1 bg-blue-50 border-blue-200" title="Nur dieses Objekt (z. B. WG-Strom)">`;
+                utilPropHtml += `<option value="">-- NK-Objekt wählen --</option>`;
+                properties.forEach(function (p) {
+                    utilPropHtml += `<option value="${p.id}" ${String(selPropId) === String(p.id) ? "selected" : ""}>${p.name}</option>`;
+                });
+                utilPropHtml += `</select>`;
+            }
+
             const isNegative = tx.amount < 0;
             const amountColor = isNegative ? 'text-red-600' : 'text-green-600';
             
@@ -774,7 +924,7 @@ window.ImmoApp.banking = {
                             <div class="text-xs text-gray-600 break-words">${tx.purpose || ''}</div>
                         </td>
                         <td class="px-4 py-3 align-top text-right font-bold ${amountColor} whitespace-nowrap">${ImmoApp.ui.formatCurrency(tx.amount)}</td>
-                        <td class="px-4 py-3 align-top">${selectHtml}</td>
+                        <td class="px-4 py-3 align-top">${selectHtml}${utilPropHtml}</td>
                         <td class="px-4 py-3 align-top text-right">
                             ${actionsMenuHtml}
                         </td>
@@ -802,6 +952,7 @@ window.ImmoApp.banking = {
                         <div class="text-xs text-gray-600 mb-2 break-words">${tx.purpose || ''}</div>
                         <div class="mb-2">
                             ${selectHtml}
+                            ${utilPropHtml}
                         </div>
                         <div class="flex justify-end">
                             ${actionsMenuHtml}

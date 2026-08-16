@@ -1,0 +1,11 @@
+{
+  "name": "ImmoAdmin",
+  "install": "python3 --version",
+  "terminals": [
+    {
+      "name": "web",
+      "command": "python3 -m http.server 8000 --directory /workspace"
+    }
+  ],
+  "ports": [8000]
+}
